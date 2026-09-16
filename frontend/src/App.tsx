@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   LayoutDashboard, Upload, Database, Truck, Shield, Zap, FileText,
   ChevronRight, ChevronDown, TrendingDown, AlertTriangle, CheckCircle,
@@ -10,6 +10,20 @@ import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, LineChart, Line, Legend, Area, AreaChart
 } from 'recharts'
+import {
+  getCarbonSummary, getCarbonActivities,
+  getSuppliers,
+  getVerificationEntries, validateVerification, getVerificationSummary,
+  runOptimization, getAIExplanation,
+  type CarbonSummary, type CarbonActivity,
+  type SupplierRecord,
+  type VerificationEntry, type VerificationResult, type VerificationSummary,
+  type OptimizationResponse,
+  type AIExplanationResponse,
+} from './api'
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+const COMPANY_ID = 1
 
 type Screen = 'dashboard' | 'upload' | 'processing' | 'review' | 'carbon' | 'suppliers' | 'verification' | 'optimizer' | 'report'
 
@@ -61,6 +75,32 @@ function ConfidenceBar({ pct }: { pct: number }) {
       </div>
       <span className="text-xs font-mono text-slate-600">{pct}%</span>
     </div>
+  )
+}
+
+// ─── Loading / Error / Empty helpers ─────────────────────────────────────────
+
+function LoadingSpinner({ label = 'Loading…' }: { label?: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '48px 0', flexDirection: 'column', gap: 12 }}>
+      <RefreshCw size={22} color="#059669" className="animate-spin" />
+      <span style={{ fontSize: 13, color: '#64748b' }}>{label}</span>
+    </div>
+  )
+}
+
+function ErrorBanner({ message }: { message: string }) {
+  return (
+    <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 10 }}>
+      <AlertTriangle size={16} color="#dc2626" />
+      <span style={{ fontSize: 13, color: '#991b1b' }}>{message}</span>
+    </div>
+  )
+}
+
+function EmptyState({ label }: { label: string }) {
+  return (
+    <div style={{ textAlign: 'center', padding: '40px 0', color: '#94a3b8', fontSize: 13 }}>{label}</div>
   )
 }
 
@@ -159,24 +199,23 @@ function TopBar({ title, sub, onNav, showProcessing }: { title: string; sub?: st
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SCREEN 1: Dashboard
+// SCREEN 1: Dashboard — connected to real backend data
 // ─────────────────────────────────────────────────────────────────────────────
 
-const emissionsData = [
-  { month: 'Apr', scope1: 28, scope2: 74, scope3: 132 },
-  { month: 'May', scope1: 31, scope2: 71, scope3: 141 },
-  { month: 'Jun', scope1: 26, scope2: 79, scope3: 128 },
-  { month: 'Jul', scope1: 29, scope2: 76, scope3: 138 },
-  { month: 'Aug', scope1: 33, scope2: 72, scope3: 145 },
-  { month: 'Sep', scope1: 30, scope2: 74, scope3: 135 },
-  { month: 'Oct', scope1: 27, scope2: 78, scope3: 130 },
-  { month: 'Nov', scope1: 32, scope2: 75, scope3: 142 },
-  { month: 'Dec', scope1: 28, scope2: 71, scope3: 128 },
-  { month: 'Jan', scope1: 30, scope2: 73, scope3: 134 },
-  { month: 'Feb', scope1: 14, scope2: 36, scope3: 62 },
-]
-
 function Dashboard({ onNav }: { onNav: (s: Screen) => void }) {
+  const [summary, setSummary] = useState<CarbonSummary | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setLoading(true)
+    setError(null)
+    getCarbonSummary(COMPANY_ID)
+      .then(setSummary)
+      .catch(e => setError(e.message ?? 'Failed to load carbon summary'))
+      .finally(() => setLoading(false))
+  }, [])
+
   const quickActions = [
     { label: 'Analyze Documents', icon: Upload, screen: 'upload' as Screen, color: '#059669' },
     { label: 'Review Carbon Data', icon: Database, screen: 'review' as Screen, color: '#3b82f6' },
@@ -186,6 +225,8 @@ function Dashboard({ onNav }: { onNav: (s: Screen) => void }) {
     { label: 'Generate Report', icon: FileText, screen: 'report' as Screen, color: '#0ea5e9' },
   ]
 
+  const fmt = (n: number) => (n / 1000).toFixed(1)
+
   return (
     <div style={{ padding: '28px 32px', maxWidth: 1440 }}>
       {/* Hero strip */}
@@ -194,75 +235,96 @@ function Dashboard({ onNav }: { onNav: (s: Screen) => void }) {
           Carbon Intelligence Dashboard
         </h2>
         <p style={{ fontSize: 14, color: '#64748b' }}>
-          Automatic extraction from 143 business documents · Last updated 2 hours ago
+          GHG Protocol-aligned prototype · Company ID {COMPANY_ID}
         </p>
       </div>
 
-      {/* Primary KPIs */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 16, marginBottom: 24 }}>
-        <div className="ct-card p-5" style={{ borderLeft: '4px solid #0f172a', gridColumn: '1' }}>
-          <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Total Emissions</p>
-          <div className="flex items-baseline gap-1.5">
-            <span style={{ fontSize: 28, fontWeight: 700, color: '#0f172a', fontFamily: 'var(--font-display)' }}>2,847</span>
-            <span style={{ fontSize: 13, color: '#64748b' }}>tCO₂e</span>
-          </div>
-          <div className="flex items-center gap-1.5 mt-2">
-            <TrendingDown size={12} color="#059669" />
-            <span style={{ fontSize: 11, color: '#059669', fontWeight: 500 }}>−8.4% vs last year</span>
-          </div>
-        </div>
-        <KpiCard label="Scope 1 — Direct" value="342" unit="tCO₂e" sub="Fuel combustion, fleet" color="emerald" icon={<BarChart3 size={20} />} />
-        <KpiCard label="Scope 2 — Energy" value="891" unit="tCO₂e" sub="Grid electricity purchased" color="blue" icon={<BarChart3 size={20} />} />
-        <KpiCard label="Scope 3 — Value Chain" value="1,614" unit="tCO₂e" sub="67 suppliers · indirect" color="violet" icon={<BarChart3 size={20} />} />
-      </div>
+      {loading && <LoadingSpinner label="Loading carbon summary…" />}
+      {error && !loading && <ErrorBanner message={error} />}
 
-      {/* Secondary KPIs */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 32 }}>
-        <KpiCard label="Data Quality Score" value="84" unit="%" sub="Primary + verified" color="emerald" />
-        <KpiCard label="Documents Analyzed" value="143" sub="PDFs, XLS, CSV, DOCX" color="amber" />
-        <KpiCard label="Suppliers Identified" value="67" sub="Across value chain" color="blue" />
-        <KpiCard label="Flagged Records" value="12" sub="Needs review" color="rose" />
-      </div>
+      {!loading && summary && (
+        <>
+          {/* Primary KPIs */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 16, marginBottom: 24 }}>
+            <div className="ct-card p-5" style={{ borderLeft: '4px solid #0f172a', gridColumn: '1' }}>
+              <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Total Emissions</p>
+              <div className="flex items-baseline gap-1.5">
+                <span style={{ fontSize: 28, fontWeight: 700, color: '#0f172a', fontFamily: 'var(--font-display)' }}>
+                  {fmt(summary.total_emissions_kgco2e)}
+                </span>
+                <span style={{ fontSize: 13, color: '#64748b' }}>tCO₂e</span>
+              </div>
+              <div className="flex items-center gap-1.5 mt-2">
+                <TrendingDown size={12} color="#059669" />
+                <span style={{ fontSize: 11, color: '#059669', fontWeight: 500 }}>GHG Protocol-aligned</span>
+              </div>
+            </div>
+            <KpiCard
+              label="Primary Emissions"
+              value={fmt(summary.primary_emissions_kgco2e)}
+              unit="tCO₂e"
+              sub="Direct measurement data"
+              color="emerald"
+              icon={<BarChart3 size={20} />}
+            />
+            <KpiCard
+              label="Estimated Emissions"
+              value={fmt(summary.estimated_emissions_kgco2e)}
+              unit="tCO₂e"
+              sub="Modelled / factor-based"
+              color="blue"
+              icon={<BarChart3 size={20} />}
+            />
+            <KpiCard
+              label="Primary Data %"
+              value={`${summary.primary_data_percentage.toFixed(1)}`}
+              unit="%"
+              sub="Of total emission sources"
+              color="violet"
+              icon={<BarChart3 size={20} />}
+            />
+          </div>
 
-      {/* Chart + Quick Actions */}
+          {/* Secondary KPIs */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 32 }}>
+            <KpiCard label="Data Quality Score" value={`${summary.primary_data_percentage.toFixed(0)}`} unit="%" sub="Primary data coverage" color="emerald" />
+            <KpiCard label="Flagged Records" value={`${summary.flagged_entries_count}`} sub="Needs review" color="rose" />
+            <KpiCard label="Company ID" value={`${summary.company_id}`} sub="Demo dataset" color="amber" />
+            <KpiCard label="Reporting Year" value="FY24–25" sub="Current period" color="blue" />
+          </div>
+        </>
+      )}
+
+      {/* Chart + Quick Actions — always shown with static trend data */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 20, marginBottom: 28 }}>
         <div className="ct-card p-6">
           <div className="flex items-center justify-between mb-5">
             <div>
-              <h3 style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>Monthly Emissions Trend</h3>
-              <p style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>Scope 1 · 2 · 3 — tCO₂e</p>
-            </div>
-            <div className="flex gap-4 text-xs text-slate-500">
-              <span className="flex items-center gap-1"><span style={{ width: 8, height: 8, borderRadius: 2, background: '#0f172a', display: 'inline-block' }} /> Scope 1</span>
-              <span className="flex items-center gap-1"><span style={{ width: 8, height: 8, borderRadius: 2, background: '#059669', display: 'inline-block' }} /> Scope 2</span>
-              <span className="flex items-center gap-1"><span style={{ width: 8, height: 8, borderRadius: 2, background: '#8b5cf6', display: 'inline-block' }} /> Scope 3</span>
+              <h3 style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>Emissions Breakdown</h3>
+              <p style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>Primary vs Estimated — kgCO₂e</p>
             </div>
           </div>
-          <ResponsiveContainer width="100%" height={200}>
-            <AreaChart data={emissionsData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-              <defs>
-                <linearGradient id="s1" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#0f172a" stopOpacity={0.15} />
-                  <stop offset="95%" stopColor="#0f172a" stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="s2" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#059669" stopOpacity={0.15} />
-                  <stop offset="95%" stopColor="#059669" stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="s3" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.12} />
-                  <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-              <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-              <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e2e8f0' }} />
-              <Area type="monotone" dataKey="scope3" stroke="#8b5cf6" strokeWidth={2} fill="url(#s3)" />
-              <Area type="monotone" dataKey="scope2" stroke="#059669" strokeWidth={2} fill="url(#s2)" />
-              <Area type="monotone" dataKey="scope1" stroke="#0f172a" strokeWidth={2} fill="url(#s1)" />
-            </AreaChart>
-          </ResponsiveContainer>
+          {summary ? (
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart
+                data={[
+                  { name: 'Primary', value: summary.primary_emissions_kgco2e / 1000 },
+                  { name: 'Estimated', value: summary.estimated_emissions_kgco2e / 1000 },
+                ]}
+                margin={{ top: 0, right: 0, left: -20, bottom: 0 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e2e8f0' }} formatter={(v) => [`${String(v)} tCO₂e`, 'Emissions']} />
+                <Bar dataKey="value" fill="#059669" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#cbd5e1' }}>
+              <span style={{ fontSize: 13 }}>No data</span>
+            </div>
+          )}
         </div>
 
         <div className="ct-card p-5">
@@ -284,7 +346,7 @@ function Dashboard({ onNav }: { onNav: (s: Screen) => void }) {
         </div>
       </div>
 
-      {/* Recent activity */}
+      {/* Recent activity — static demo section */}
       <div className="ct-card p-6">
         <div className="flex items-center justify-between mb-4">
           <h3 style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>Recent Extraction Activity</h3>
@@ -325,7 +387,7 @@ function Dashboard({ onNav }: { onNav: (s: Screen) => void }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SCREEN 2: Upload & Analyze
+// SCREEN 2: Upload & Analyze (static — PDF ingestion is out of scope)
 // ─────────────────────────────────────────────────────────────────────────────
 
 const uploadedFiles = [
@@ -437,7 +499,7 @@ function UploadAnalyze({ onNext }: { onNext: () => void }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SCREEN 3: Document Processing
+// SCREEN 3: Document Processing (static)
 // ─────────────────────────────────────────────────────────────────────────────
 
 function DocumentProcessing({ onNext }: { onNext: () => void }) {
@@ -541,7 +603,7 @@ function DocumentProcessing({ onNext }: { onNext: () => void }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SCREEN 4: Extracted Data Review
+// SCREEN 4: Extracted Data Review (static)
 // ─────────────────────────────────────────────────────────────────────────────
 
 const extractedRecords = [
@@ -634,26 +696,31 @@ function ExtractedReview() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SCREEN 5: Carbon Data
+// SCREEN 5: Carbon Data — connected to real backend
 // ─────────────────────────────────────────────────────────────────────────────
 
-const carbonRecords = [
-  { doc: 'KSEB_Bill_Nov2024.pdf', date: '30 Nov 2024', scope: 2, activity: 'Grid Electricity', qty: '18,400 kWh', ef: '0.82 kgCO₂e/kWh', co2e: 15.09, quality: 'primary', status: 'verified' },
-  { doc: 'Fleet_Diesel_Oct2024.xlsx', date: '31 Oct 2024', scope: 1, activity: 'Diesel Combustion', qty: '3,420 L', ef: '2.68 kgCO₂e/L', co2e: 9.17, quality: 'primary', status: 'verified' },
-  { doc: 'LPG_Invoices_Q2.pdf', date: '30 Jun 2024', scope: 1, activity: 'LPG Combustion', qty: '1,800 kg', ef: '3.00 kgCO₂e/kg', co2e: 5.40, quality: 'primary', status: 'verified' },
-  { doc: 'Supplier_TataSteel_Q3.pdf', date: '30 Sep 2024', scope: 3, activity: 'Steel Purchase', qty: '240 t', ef: '1.9 tCO₂e/t', co2e: 456.0, quality: 'estimated', status: 'pending' },
-  { doc: 'MSIL_Supplier_2024.xlsx', date: '15 Oct 2024', scope: 3, activity: 'Auto Components', qty: '580 units', ef: '0.42 tCO₂e/unit', co2e: 243.6, quality: 'primary', status: 'verified' },
-  { doc: 'Air_Travel_Corporate.docx', date: '20 Nov 2024', scope: 3, activity: 'Air Travel — Dom.', qty: '42 segments', ef: '0.44 tCO₂e/seg', co2e: 18.48, quality: 'estimated', status: 'pending' },
-  { doc: 'Water_Consumption.csv', date: '30 Sep 2024', scope: 3, activity: 'Water Treatment', qty: '2,200 m³', ef: '0.001 tCO₂e/m³', co2e: 2.20, quality: 'estimated', status: 'flagged' },
-]
-
 function CarbonData() {
+  const [activities, setActivities] = useState<CarbonActivity[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setLoading(true)
+    setError(null)
+    getCarbonActivities(COMPANY_ID)
+      .then(setActivities)
+      .catch(e => setError(e.message ?? 'Failed to load carbon activities'))
+      .finally(() => setLoading(false))
+  }, [])
+
   return (
     <div style={{ padding: '28px 32px' }}>
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="font-display" style={{ fontSize: 22, fontWeight: 600, color: '#0f172a', marginBottom: 2 }}>Carbon Data</h2>
-          <p style={{ fontSize: 13, color: '#64748b' }}>Automatically extracted from 143 documents · 7 records shown</p>
+          <p style={{ fontSize: 13, color: '#64748b' }}>
+            {loading ? 'Loading…' : error ? 'Error loading data' : `${activities.length} activity records from database`}
+          </p>
         </div>
         <div className="flex gap-2">
           <button style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: '#64748b', background: 'white', border: '1px solid #e2e8f0', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500 }}>
@@ -672,71 +739,78 @@ function CarbonData() {
       <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10 }}>
         <Info size={14} color="#059669" />
         <span style={{ fontSize: 13, color: '#065f46' }}>
-          <strong>287 data points</strong> extracted automatically from your uploaded documents. Manual entries supplement AI-extracted data.
+          <strong>{activities.length} carbon activity records</strong> loaded from the PostgreSQL database. Emissions calculated as activity_quantity × emission_factor.
         </span>
       </div>
 
-      <div className="ct-card" style={{ overflow: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
-          <thead>
-            <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-              {['Source Document', 'Date', 'Scope', 'Activity', 'Quantity', 'Emission Factor', 'CO₂e (t)', 'Data Quality', 'Status'].map(h => (
-                <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#64748b', letterSpacing: '0.04em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {carbonRecords.map((r, i) => (
-              <tr key={i} className="ct-row" style={{ borderBottom: i < carbonRecords.length - 1 ? '1px solid #f8fafc' : 'none' }}>
-                <td style={{ padding: '11px 14px' }}>
-                  <span style={{ color: '#059669', cursor: 'pointer', fontWeight: 500, fontSize: 12 }}>{r.doc}</span>
-                </td>
-                <td style={{ padding: '11px 14px', color: '#64748b', fontSize: 12 }}>{r.date}</td>
-                <td style={{ padding: '11px 14px' }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, background: r.scope === 1 ? '#f0fdf4' : r.scope === 2 ? '#eff6ff' : '#faf5ff', color: r.scope === 1 ? '#065f46' : r.scope === 2 ? '#1d4ed8' : '#6d28d9', padding: '2px 8px', borderRadius: 4 }}>S{r.scope}</span>
-                </td>
-                <td style={{ padding: '11px 14px', fontWeight: 500, color: '#1e293b' }}>{r.activity}</td>
-                <td style={{ padding: '11px 14px', fontFamily: 'var(--font-mono)', fontSize: 12, color: '#334155' }}>{r.qty}</td>
-                <td style={{ padding: '11px 14px', fontFamily: 'var(--font-mono)', fontSize: 11, color: '#64748b' }}>{r.ef}</td>
-                <td style={{ padding: '11px 14px', fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#1e293b', fontSize: 13 }}>{r.co2e.toFixed(2)}</td>
-                <td style={{ padding: '11px 14px' }}>
-                  {r.quality === 'primary' ? <PrimaryBadge /> : <EstimatedBadge />}
-                </td>
-                <td style={{ padding: '11px 14px' }}>
-                  {r.status === 'verified' && <span style={{ fontSize: 12, color: '#059669', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 3 }}><CheckCircle size={12} /> Verified</span>}
-                  {r.status === 'pending' && <span style={{ fontSize: 12, color: '#d97706', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 3 }}><Clock size={12} /> Pending</span>}
-                  {r.status === 'flagged' && <span style={{ fontSize: 12, color: '#ef4444', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 3 }}><AlertTriangle size={12} /> Flagged</span>}
-                </td>
+      {loading && <LoadingSpinner label="Loading carbon activities…" />}
+      {error && !loading && <ErrorBanner message={error} />}
+      {!loading && !error && activities.length === 0 && <EmptyState label="No carbon activities found. Use POST /api/v1/seed to load demo data." />}
+
+      {!loading && !error && activities.length > 0 && (
+        <div className="ct-card" style={{ overflow: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+            <thead>
+              <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                {['ID', 'Activity Type', 'Quantity', 'Unit', 'Emissions (kgCO₂e)', 'Data Quality', 'Flagged'].map(h => (
+                  <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#64748b', letterSpacing: '0.04em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{h}</th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {activities.map((r, i) => (
+                <tr key={r.entry_id} className="ct-row" style={{ borderBottom: i < activities.length - 1 ? '1px solid #f8fafc' : 'none' }}>
+                  <td style={{ padding: '11px 14px', fontFamily: 'var(--font-mono)', fontSize: 11, color: '#94a3b8' }}>#{r.entry_id}</td>
+                  <td style={{ padding: '11px 14px', fontWeight: 500, color: '#1e293b' }}>{r.activity_type}</td>
+                  <td style={{ padding: '11px 14px', fontFamily: 'var(--font-mono)', fontSize: 12, color: '#334155' }}>{r.activity_quantity.toLocaleString()}</td>
+                  <td style={{ padding: '11px 14px', color: '#64748b', fontSize: 12 }}>{r.activity_unit}</td>
+                  <td style={{ padding: '11px 14px', fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#1e293b', fontSize: 13 }}>
+                    {r.emissions_kgco2e.toFixed(2)}
+                  </td>
+                  <td style={{ padding: '11px 14px' }}>
+                    {r.is_primary ? <PrimaryBadge /> : <EstimatedBadge />}
+                  </td>
+                  <td style={{ padding: '11px 14px' }}>
+                    {r.is_flagged
+                      ? <span style={{ fontSize: 12, color: '#ef4444', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 3 }}><AlertTriangle size={12} /> Flagged</span>
+                      : <span style={{ fontSize: 12, color: '#059669', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 3 }}><CheckCircle size={12} /> OK</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SCREEN 6: Suppliers
+// SCREEN 6: Suppliers — connected to real backend
 // ─────────────────────────────────────────────────────────────────────────────
 
-const suppliers = [
-  { name: 'Tata Steel Ltd.', category: 'Raw Materials', emissions: 456.0, dataType: 'estimated', confidence: 71, status: 'flagged', reason: 'No direct emissions data; IPCC factor used', docs: 2 },
-  { name: 'MSIL Supplier Network', category: 'Auto Components', emissions: 243.6, dataType: 'primary', confidence: 94, status: 'verified', reason: null, docs: 4 },
-  { name: 'DHL Logistics', category: 'Transport & Freight', emissions: 187.4, dataType: 'estimated', confidence: 68, status: 'pending', reason: 'Partial route data', docs: 1 },
-  { name: 'BPCL Fuel Station', category: 'Fuel Supply', emissions: 112.3, dataType: 'primary', confidence: 99, status: 'verified', reason: null, docs: 6 },
-  { name: 'L&T Engineering', category: 'Contract Services', emissions: 88.7, dataType: 'estimated', confidence: 55, status: 'flagged', reason: 'Spend-based estimate; no primary data', docs: 1 },
-  { name: 'Hindalco Industries', category: 'Aluminium', emissions: 76.2, dataType: 'primary', confidence: 88, status: 'verified', reason: null, docs: 3 },
-]
-
 function Suppliers() {
+  const [supplierList, setSupplierList] = useState<SupplierRecord[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('all')
-  const [selected, setSelected] = useState<typeof suppliers[0] | null>(null)
+  const [selected, setSelected] = useState<SupplierRecord | null>(null)
 
-  const filtered = suppliers.filter(s =>
-    s.name.toLowerCase().includes(search.toLowerCase()) &&
-    (filter === 'all' || (filter === 'primary' && s.dataType === 'primary') || (filter === 'estimated' && s.dataType === 'estimated') || (filter === 'flagged' && s.status === 'flagged'))
+  useEffect(() => {
+    setLoading(true)
+    setError(null)
+    getSuppliers(COMPANY_ID)
+      .then(setSupplierList)
+      .catch(e => setError(e.message ?? 'Failed to load suppliers'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const filtered = supplierList.filter(s =>
+    s.supplier_name.toLowerCase().includes(search.toLowerCase()) &&
+    (filter === 'all' ||
+      (filter === 'verified' && s.is_verified) ||
+      (filter === 'unverified' && !s.is_verified))
   )
 
   return (
@@ -744,10 +818,10 @@ function Suppliers() {
       <div style={{ flex: 1 }}>
         {/* KPIs */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 24 }}>
-          <KpiCard label="Total Suppliers" value="67" sub="Across value chain" color="blue" />
-          <KpiCard label="Scope 3 Emissions" value="1,614" unit="tCO₂e" sub="All value chain" color="violet" />
-          <KpiCard label="Primary Data" value="38%" sub="Direct measurement" color="emerald" />
-          <KpiCard label="Flagged" value="12" sub="Need attention" color="rose" />
+          <KpiCard label="Total Suppliers" value={`${supplierList.length}`} sub="In database" color="blue" />
+          <KpiCard label="Verified" value={`${supplierList.filter(s => s.is_verified).length}`} sub="Confirmed" color="emerald" />
+          <KpiCard label="Unverified" value={`${supplierList.filter(s => !s.is_verified).length}`} sub="Need attention" color="rose" />
+          <KpiCard label="Company ID" value={`${COMPANY_ID}`} sub="Demo dataset" color="amber" />
         </div>
 
         {/* Search + filter */}
@@ -761,49 +835,53 @@ function Suppliers() {
               style={{ border: 'none', outline: 'none', fontSize: 13, color: '#1e293b', background: 'transparent', width: '100%', fontFamily: 'inherit' }}
             />
           </div>
-          {['all', 'primary', 'estimated', 'flagged'].map(f => (
+          {['all', 'verified', 'unverified'].map(f => (
             <button key={f} onClick={() => setFilter(f)} style={{ padding: '7px 14px', borderRadius: 7, fontSize: 12, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit', border: '1px solid', borderColor: filter === f ? '#059669' : '#e2e8f0', background: filter === f ? '#059669' : 'white', color: filter === f ? 'white' : '#64748b' }}>
               {f.charAt(0).toUpperCase() + f.slice(1)}
             </button>
           ))}
         </div>
 
+        {loading && <LoadingSpinner label="Loading suppliers…" />}
+        {error && !loading && <ErrorBanner message={error} />}
+        {!loading && !error && filtered.length === 0 && <EmptyState label="No suppliers found." />}
+
         {/* Supplier table */}
-        <div className="ct-card" style={{ overflow: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
-            <thead>
-              <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                {['Supplier', 'Category', 'Emissions (tCO₂e)', 'Data Type', 'Confidence', 'Status', ''].map(h => (
-                  <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#64748b', letterSpacing: '0.04em', textTransform: 'uppercase' }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((s, i) => (
-                <tr key={i} className="ct-row" style={{ borderBottom: i < filtered.length - 1 ? '1px solid #f8fafc' : 'none', cursor: 'pointer' }} onClick={() => setSelected(s)}>
-                  <td style={{ padding: '12px 14px' }}>
-                    <div className="flex items-center gap-2">
-                      <div style={{ width: 28, height: 28, background: '#f1f5f9', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: '#64748b' }}>
-                        {s.name.split(' ').map(w => w[0]).join('').slice(0, 2)}
-                      </div>
-                      <span style={{ fontWeight: 500, color: '#1e293b' }}>{s.name}</span>
-                    </div>
-                  </td>
-                  <td style={{ padding: '12px 14px', color: '#64748b' }}>{s.category}</td>
-                  <td style={{ padding: '12px 14px', fontFamily: 'var(--font-mono)', fontWeight: 600, color: '#1e293b' }}>{s.emissions.toFixed(1)}</td>
-                  <td style={{ padding: '12px 14px' }}>{s.dataType === 'primary' ? <PrimaryBadge /> : <EstimatedBadge />}</td>
-                  <td style={{ padding: '12px 14px' }}><ConfidenceBar pct={s.confidence} /></td>
-                  <td style={{ padding: '12px 14px' }}>
-                    {s.status === 'verified' && <span style={{ fontSize: 12, color: '#059669', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 3 }}><CheckCircle size={12} /> Verified</span>}
-                    {s.status === 'pending' && <span style={{ fontSize: 12, color: '#d97706', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 3 }}><Clock size={12} /> Pending</span>}
-                    {s.status === 'flagged' && <span style={{ fontSize: 12, color: '#ef4444', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 3 }}><AlertTriangle size={12} /> Flagged</span>}
-                  </td>
-                  <td style={{ padding: '12px 14px' }}><ChevronRight size={14} color="#94a3b8" /></td>
+        {!loading && !error && filtered.length > 0 && (
+          <div className="ct-card" style={{ overflow: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+              <thead>
+                <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                  {['Supplier', 'Industry', 'Location', 'Verified', ''].map(h => (
+                    <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#64748b', letterSpacing: '0.04em', textTransform: 'uppercase' }}>{h}</th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {filtered.map((s, i) => (
+                  <tr key={s.supplier_id} className="ct-row" style={{ borderBottom: i < filtered.length - 1 ? '1px solid #f8fafc' : 'none', cursor: 'pointer' }} onClick={() => setSelected(s)}>
+                    <td style={{ padding: '12px 14px' }}>
+                      <div className="flex items-center gap-2">
+                        <div style={{ width: 28, height: 28, background: '#f1f5f9', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: '#64748b' }}>
+                          {s.supplier_name.split(' ').map(w => w[0]).join('').slice(0, 2)}
+                        </div>
+                        <span style={{ fontWeight: 500, color: '#1e293b' }}>{s.supplier_name}</span>
+                      </div>
+                    </td>
+                    <td style={{ padding: '12px 14px', color: '#64748b' }}>{s.industry ?? '—'}</td>
+                    <td style={{ padding: '12px 14px', color: '#64748b' }}>{s.location ?? '—'}</td>
+                    <td style={{ padding: '12px 14px' }}>
+                      {s.is_verified
+                        ? <span style={{ fontSize: 12, color: '#059669', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 3 }}><CheckCircle size={12} /> Verified</span>
+                        : <span style={{ fontSize: 12, color: '#d97706', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 3 }}><Clock size={12} /> Pending</span>}
+                    </td>
+                    <td style={{ padding: '12px 14px' }}><ChevronRight size={14} color="#94a3b8" /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Supplier drawer */}
@@ -814,17 +892,17 @@ function Suppliers() {
             <button onClick={() => setSelected(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}><X size={16} /></button>
           </div>
           <div style={{ width: 40, height: 40, background: '#f1f5f9', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: '#334155', marginBottom: 12 }}>
-            {selected.name.split(' ').map(w => w[0]).join('').slice(0, 2)}
+            {selected.supplier_name.split(' ').map(w => w[0]).join('').slice(0, 2)}
           </div>
-          <h4 style={{ fontSize: 15, fontWeight: 600, color: '#0f172a', marginBottom: 2 }}>{selected.name}</h4>
-          <p style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>{selected.category}</p>
+          <h4 style={{ fontSize: 15, fontWeight: 600, color: '#0f172a', marginBottom: 2 }}>{selected.supplier_name}</h4>
+          <p style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>{selected.industry ?? 'Unknown industry'}</p>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 18 }}>
             {[
-              { label: 'Scope 3 Emissions', value: `${selected.emissions.toFixed(1)} tCO₂e` },
-              { label: 'Data Quality', value: selected.dataType },
-              { label: 'Confidence', value: `${selected.confidence}%` },
-              { label: 'Source Documents', value: `${selected.docs} files` },
+              { label: 'Supplier ID', value: `#${selected.supplier_id}` },
+              { label: 'Industry', value: selected.industry ?? '—' },
+              { label: 'Location', value: selected.location ?? '—' },
+              { label: 'Verified', value: selected.is_verified ? 'Yes' : 'No' },
             ].map(row => (
               <div key={row.label} className="flex justify-between" style={{ borderBottom: '1px solid #f1f5f9', paddingBottom: 8 }}>
                 <span style={{ fontSize: 12, color: '#64748b' }}>{row.label}</span>
@@ -833,17 +911,8 @@ function Suppliers() {
             ))}
           </div>
 
-          {selected.reason && (
-            <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 8, padding: '10px 12px', marginBottom: 16 }}>
-              <p style={{ fontSize: 11, color: '#9a3412', display: 'flex', alignItems: 'flex-start', gap: 6 }}>
-                <AlertTriangle size={12} style={{ flexShrink: 0, marginTop: 1 }} />
-                <span><strong>Flag reason:</strong> {selected.reason}</span>
-              </p>
-            </div>
-          )}
-
           <button style={{ width: '100%', background: '#0f172a', color: 'white', border: 'none', borderRadius: 8, padding: '10px', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-            <Shield size={13} /> Verify on Ledger
+            <Shield size={13} /> View on Ledger
           </button>
         </div>
       )}
@@ -852,63 +921,117 @@ function Suppliers() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SCREEN 7: Verification
+// SCREEN 7: Verification — connected to real backend SHA-256 hash-chain
 // ─────────────────────────────────────────────────────────────────────────────
 
-const blocks = [
-  {
-    id: 847, ts: '2024-11-30 18:42:03 UTC', prevHash: '0xa3f9...d7c2', hash: '0x1b8e...4f91',
-    payload: { type: 'Carbon Record', activity: 'Grid Electricity', co2e: '15.09 tCO₂e', source: 'KSEB_Bill_Nov2024.pdf', facility: 'Plant — Kochi' }
-  },
-  {
-    id: 846, ts: '2024-10-31 16:15:22 UTC', prevHash: '0x7d4c...a1b3', hash: '0xa3f9...d7c2',
-    payload: { type: 'Carbon Record', activity: 'Diesel Combustion', co2e: '9.17 tCO₂e', source: 'Fleet_Diesel_Oct2024.xlsx', facility: 'Fleet HQ' }
-  },
-  {
-    id: 845, ts: '2024-10-15 09:30:44 UTC', prevHash: '0x2e81...c490', hash: '0x7d4c...a1b3',
-    payload: { type: 'Supplier Record', activity: 'Auto Components — MSIL', co2e: '243.6 tCO₂e', source: 'MSIL_Supplier_2024.xlsx', facility: 'Procurement' }
-  },
-  {
-    id: 844, ts: '2024-09-30 20:08:11 UTC', prevHash: '0x5c3a...f082', hash: '0x2e81...c490',
-    payload: { type: 'Carbon Record', activity: 'LPG Combustion', co2e: '5.40 tCO₂e', source: 'LPG_Invoices_Q2.pdf', facility: 'Plant — Pune' }
-  },
-]
-
 function Verification() {
-  const [expanded, setExpanded] = useState<number | null>(847)
+  const [entries, setEntries] = useState<VerificationEntry[]>([])
+  const [chainResult, setChainResult] = useState<VerificationResult | null>(null)
+  const [summary, setSummary] = useState<VerificationSummary | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [validating, setValidating] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState<number | null>(null)
+
+  const loadData = useCallback(() => {
+    setLoading(true)
+    setError(null)
+    Promise.all([
+      getVerificationEntries(),
+      validateVerification(),
+      getVerificationSummary(COMPANY_ID),
+    ])
+      .then(([e, r, s]) => {
+        setEntries(e)
+        setChainResult(r)
+        setSummary(s)
+        if (e.length > 0) setExpanded(e[0].entry_id)
+      })
+      .catch(e => setError(e.message ?? 'Failed to load verification data'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  useEffect(() => { loadData() }, [loadData])
+
+  const handleVerify = () => {
+    setValidating(true)
+    validateVerification()
+      .then(setChainResult)
+      .catch(e => setError(e.message))
+      .finally(() => setValidating(false))
+  }
+
+  const truncateHash = (h: string) => h.length > 16 ? `${h.slice(0, 8)}…${h.slice(-6)}` : h
 
   return (
     <div style={{ padding: '28px 32px', maxWidth: 1000 }}>
-      {/* Chain status */}
-      <div style={{ background: 'linear-gradient(135deg, #022c22, #064e3b)', borderRadius: 14, padding: '24px 28px', marginBottom: 28, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      {/* Chain status banner */}
+      <div style={{
+        background: chainResult?.is_verified
+          ? 'linear-gradient(135deg, #022c22, #064e3b)'
+          : 'linear-gradient(135deg, #450a0a, #7f1d1d)',
+        borderRadius: 14, padding: '24px 28px', marginBottom: 28, display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+      }}>
         <div className="flex items-center gap-4">
           <div style={{ width: 48, height: 48, background: 'rgba(16,185,129,0.2)', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Shield size={22} color="#34d399" />
+            <Shield size={22} color={chainResult?.is_verified ? '#34d399' : '#f87171'} />
           </div>
           <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span style={{ fontSize: 13, fontWeight: 700, color: '#34d399', letterSpacing: '0.08em', textTransform: 'uppercase' }}>✓ CHAIN INTACT</span>
-            </div>
-            <p style={{ fontSize: 13, color: '#6ee7b7' }}>847 blocks verified · All hashes match · Tamper-evident ledger</p>
+            {loading
+              ? <span style={{ fontSize: 13, color: '#94a3b8' }}>Loading verification data…</span>
+              : chainResult
+                ? (
+                  <>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span style={{ fontSize: 13, fontWeight: 700, color: chainResult.is_verified ? '#34d399' : '#f87171', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                        {chainResult.is_verified ? '✓ CHAIN INTACT' : '✗ CHAIN COMPROMISED'}
+                      </span>
+                    </div>
+                    <p style={{ fontSize: 13, color: '#6ee7b7' }}>
+                      {chainResult.checked_entries} entries checked · SHA-256 hash-chain ledger · {chainResult.is_verified ? 'All hashes match' : `${chainResult.invalid_entries.length} invalid entries`}
+                    </p>
+                  </>
+                )
+                : <span style={{ fontSize: 13, color: '#f87171' }}>Verification unavailable</span>}
           </div>
         </div>
         <div className="flex gap-3">
-          <button style={{ background: 'rgba(255,255,255,0.1)', color: '#e2e8f0', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 8, padding: '9px 18px', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Download size={13} /> Export Proof
-          </button>
-          <button style={{ background: '#059669', color: 'white', border: 'none', borderRadius: 8, padding: '9px 18px', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <RefreshCw size={13} /> Verify Chain
+          <button
+            onClick={handleVerify}
+            disabled={validating}
+            style={{ background: '#059669', color: 'white', border: 'none', borderRadius: 8, padding: '9px 18px', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <RefreshCw size={13} className={validating ? 'animate-spin' : ''} /> {validating ? 'Verifying…' : 'Verify Chain'}
           </button>
         </div>
       </div>
 
-      {/* Chain stats */}
+      {/* Chain stats from real summary */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 24 }}>
-        {[
-          { label: 'Total Blocks', value: '847', color: '#0f172a' },
-          { label: 'Last Verified', value: '2h ago', color: '#059669' },
-          { label: 'Integrity', value: '100%', color: '#059669' },
-          { label: 'Pending', value: '3', color: '#d97706' },
+        {summary ? (
+          <>
+            <div className="ct-card p-4 text-center">
+              <p style={{ fontSize: 20, fontWeight: 700, color: '#0f172a', fontFamily: 'var(--font-display)' }}>{summary.total_entries}</p>
+              <p style={{ fontSize: 11, color: '#64748b', marginTop: 4, fontWeight: 500 }}>Total Entries</p>
+            </div>
+            <div className="ct-card p-4 text-center">
+              <p style={{ fontSize: 20, fontWeight: 700, color: '#059669', fontFamily: 'var(--font-display)' }}>{summary.verified_entries}</p>
+              <p style={{ fontSize: 11, color: '#64748b', marginTop: 4, fontWeight: 500 }}>Verified</p>
+            </div>
+            <div className="ct-card p-4 text-center">
+              <p style={{ fontSize: 20, fontWeight: 700, color: '#059669', fontFamily: 'var(--font-display)' }}>{summary.verification_percentage.toFixed(0)}%</p>
+              <p style={{ fontSize: 11, color: '#64748b', marginTop: 4, fontWeight: 500 }}>Integrity</p>
+            </div>
+            <div className="ct-card p-4 text-center">
+              <p style={{ fontSize: 20, fontWeight: 700, color: '#d97706', fontFamily: 'var(--font-display)' }}>{summary.flagged_entries}</p>
+              <p style={{ fontSize: 11, color: '#64748b', marginTop: 4, fontWeight: 500 }}>Flagged</p>
+            </div>
+          </>
+        ) : [
+          { label: 'Total Entries', value: '—', color: '#0f172a' },
+          { label: 'Verified', value: '—', color: '#059669' },
+          { label: 'Integrity', value: '—', color: '#059669' },
+          { label: 'Flagged', value: '—', color: '#d97706' },
         ].map(m => (
           <div key={m.label} className="ct-card p-4 text-center">
             <p style={{ fontSize: 20, fontWeight: 700, color: m.color, fontFamily: 'var(--font-display)' }}>{m.value}</p>
@@ -917,200 +1040,259 @@ function Verification() {
         ))}
       </div>
 
-      {/* Block explorer */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {blocks.map((b) => (
-          <div key={b.id} className="block-card">
-            <div
-              className="flex items-center justify-between"
-              style={{ padding: '14px 18px', cursor: 'pointer' }}
-              onClick={() => setExpanded(expanded === b.id ? null : b.id)}
-            >
-              <div className="flex items-center gap-4">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Lock size={12} color="#059669" />
-                  <span style={{ fontSize: 11, fontWeight: 700, color: '#059669', fontFamily: 'var(--font-mono)' }}>Block #{b.id}</span>
-                </div>
-                <div style={{ height: 16, width: 1, background: '#e2e8f0' }} />
-                <span style={{ fontSize: 12, color: '#64748b', fontFamily: 'var(--font-mono)' }}>{b.ts}</span>
-                <div style={{ height: 16, width: 1, background: '#e2e8f0' }} />
-                <span style={{ fontSize: 12, color: '#1e293b', fontWeight: 500 }}>{b.payload.activity}</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <CheckCircle size={14} color="#059669" />
-                {expanded === b.id ? <ChevronDown size={14} color="#94a3b8" /> : <ChevronRight size={14} color="#94a3b8" />}
-              </div>
-            </div>
-
-            {expanded === b.id && (
-              <div style={{ borderTop: '1px solid #f1f5f9', padding: '16px 18px', background: '#fafafa', borderRadius: '0 0 10px 10px' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 14 }}>
-                  <div>
-                    <p style={{ fontSize: 10, color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 4 }}>Previous Hash</p>
-                    <p className="hash-text">{b.prevHash}</p>
-                  </div>
-                  <div>
-                    <p style={{ fontSize: 10, color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 4 }}>Current Hash</p>
-                    <p className="hash-text" style={{ color: '#059669' }}>{b.hash}</p>
-                  </div>
-                </div>
-                <div style={{ background: '#f1f5f9', borderRadius: 8, padding: '12px 14px' }}>
-                  <p style={{ fontSize: 10, color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 8 }}>Payload</p>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-                    {Object.entries(b.payload).map(([k, v]) => (
-                      <div key={k}>
-                        <span style={{ fontSize: 10, color: '#94a3b8', fontFamily: 'var(--font-mono)' }}>{k}: </span>
-                        <span style={{ fontSize: 11, fontWeight: 600, color: '#334155', fontFamily: 'var(--font-mono)' }}>{v}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        ))}
+      {/* Info note */}
+      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '10px 14px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <Info size={14} color="#64748b" />
+        <span style={{ fontSize: 12, color: '#475569' }}>
+          This is a <strong>SHA-256 hash-chain ledger</strong> (tamper-evident audit trail). Each block's hash depends on the previous block. This is not a deployed blockchain or smart contract.
+        </span>
       </div>
+
+      {loading && <LoadingSpinner label="Loading ledger entries…" />}
+      {error && !loading && <ErrorBanner message={error} />}
+      {!loading && !error && entries.length === 0 && <EmptyState label="No ledger entries. Seed demo data first." />}
+
+      {/* Block explorer */}
+      {!loading && !error && entries.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {entries.map((b) => (
+            <div key={b.entry_id} className="block-card">
+              <div
+                className="flex items-center justify-between"
+                style={{ padding: '14px 18px', cursor: 'pointer' }}
+                onClick={() => setExpanded(expanded === b.entry_id ? null : b.entry_id)}
+              >
+                <div className="flex items-center gap-4">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Lock size={12} color="#059669" />
+                    <span style={{ fontSize: 11, fontWeight: 700, color: '#059669', fontFamily: 'var(--font-mono)' }}>Entry #{b.entry_id}</span>
+                  </div>
+                  <div style={{ height: 16, width: 1, background: '#e2e8f0' }} />
+                  <span style={{ fontSize: 12, color: '#64748b', fontFamily: 'var(--font-mono)' }}>{b.created_at.slice(0, 19).replace('T', ' ')}</span>
+                  <div style={{ height: 16, width: 1, background: '#e2e8f0' }} />
+                  <span style={{ fontSize: 12, color: '#1e293b', fontWeight: 500 }}>{b.entry_type}</span>
+                  <div style={{ height: 16, width: 1, background: '#e2e8f0' }} />
+                  {b.is_primary ? <PrimaryBadge /> : <EstimatedBadge />}
+                </div>
+                <div className="flex items-center gap-3">
+                  {b.is_verified
+                    ? <CheckCircle size={14} color="#059669" />
+                    : <AlertTriangle size={14} color="#ef4444" />}
+                  {expanded === b.entry_id ? <ChevronDown size={14} color="#94a3b8" /> : <ChevronRight size={14} color="#94a3b8" />}
+                </div>
+              </div>
+
+              {expanded === b.entry_id && (
+                <div style={{ borderTop: '1px solid #f1f5f9', padding: '16px 18px', background: '#fafafa', borderRadius: '0 0 10px 10px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 14 }}>
+                    <div>
+                      <p style={{ fontSize: 10, color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 4 }}>Previous Hash</p>
+                      <p className="hash-text">{b.previous_hash ?? '(genesis)'}</p>
+                    </div>
+                    <div>
+                      <p style={{ fontSize: 10, color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 4 }}>Block Hash</p>
+                      <p className="hash-text" style={{ color: '#059669' }}>{b.block_hash}</p>
+                    </div>
+                  </div>
+                  <div style={{ background: '#f1f5f9', borderRadius: 8, padding: '12px 14px' }}>
+                    <p style={{ fontSize: 10, color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 8 }}>Payload</p>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+                      {[
+                        { k: 'entry_id', v: b.entry_id },
+                        { k: 'entry_type', v: b.entry_type },
+                        { k: 'source_id', v: b.source_id },
+                        { k: 'data_hash', v: truncateHash(b.data_hash) },
+                        { k: 'is_primary', v: String(b.is_primary) },
+                      ].map(({ k, v }) => (
+                        <div key={k}>
+                          <span style={{ fontSize: 10, color: '#94a3b8', fontFamily: 'var(--font-mono)' }}>{k}: </span>
+                          <span style={{ fontSize: 11, fontWeight: 600, color: '#334155', fontFamily: 'var(--font-mono)' }}>{String(v)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SCREEN 8: Optimizer
+// SCREEN 8: Optimizer — connected to real backend
 // ─────────────────────────────────────────────────────────────────────────────
 
-const interventions = [
-  { name: 'Switch to Green Tariff (KSEB RE)', scope: 2, abatement: 142.4, cost: 1800000, costPerKg: 12.64, selected: true },
-  { name: 'Fleet Electrification — Phase 1', scope: 1, abatement: 94.7, cost: 4200000, costPerKg: 44.35, selected: true },
-  { name: 'Rooftop Solar — Plant Kochi', scope: 2, abatement: 87.2, cost: 3100000, costPerKg: 35.55, selected: true },
-  { name: 'Supplier Engagement — Tata Steel', scope: 3, abatement: 228.0, cost: 6500000, costPerKg: 28.51, selected: false },
-  { name: 'Energy Audit + Retrofits', scope: 1, abatement: 36.5, cost: 800000, costPerKg: 21.92, selected: true },
-  { name: 'Carbon Offset — Gold Standard', scope: 3, abatement: 50.0, cost: 1000000, costPerKg: 20.00, selected: false },
-]
-
-const abatementData = interventions.filter(i => i.selected).map(i => ({ name: i.name.length > 22 ? i.name.slice(0, 22) + '…' : i.name, abatement: i.abatement }))
-
 function Optimizer() {
-  const [budget, setBudget] = useState('10000000')
-  const [selected, setSelected] = useState(new Set(interventions.filter(i => i.selected).map(i => i.name)))
+  const [targetPct, setTargetPct] = useState('10')
+  const [budgetInr, setBudgetInr] = useState('500000')
+  const [result, setResult] = useState<OptimizationResponse | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  const total = interventions.filter(i => selected.has(i.name)).reduce((a, b) => a + b.abatement, 0)
-  const spent = interventions.filter(i => selected.has(i.name)).reduce((a, b) => a + b.cost, 0)
-  const budgetN = parseInt(budget.replace(/,/g, '')) || 0
-  const avgCost = spent > 0 ? (spent / (total * 1000)).toFixed(2) : '0'
-
-  const toggle = (name: string) => {
-    const next = new Set(selected)
-    next.has(name) ? next.delete(name) : next.add(name)
-    setSelected(next)
+  const handleOptimize = () => {
+    const target = parseFloat(targetPct)
+    const budget = parseFloat(budgetInr.replace(/,/g, ''))
+    if (isNaN(target) || target <= 0 || target > 100) {
+      setError('Target reduction must be between 0.01% and 100%')
+      return
+    }
+    setLoading(true)
+    setError(null)
+    runOptimization({
+      company_id: COMPANY_ID,
+      target_reduction_percentage: target,
+      budget_inr: isNaN(budget) ? undefined : budget,
+    })
+      .then(setResult)
+      .catch(e => setError(e.message ?? 'Optimization failed'))
+      .finally(() => setLoading(false))
   }
+
+  const chartData = result?.recommendations.map(r => ({
+    name: r.action.length > 22 ? r.action.slice(0, 22) + '…' : r.action,
+    abatement: parseFloat((r.estimated_reduction_kgco2e / 1000).toFixed(2)),
+  })) ?? []
 
   return (
     <div style={{ padding: '28px 32px' }}>
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="font-display" style={{ fontSize: 22, fontWeight: 600, color: '#0f172a', marginBottom: 2 }}>Reduction Optimizer</h2>
-          <p style={{ fontSize: 13, color: '#64748b' }}>Select interventions within your budget to maximize abatement</p>
-        </div>
-        <div className="flex gap-2">
-          <button style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'white', background: '#059669', border: 'none', borderRadius: 8, padding: '9px 18px', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600 }}>
-            <FileText size={13} /> Add to Report
-          </button>
+          <p style={{ fontSize: 13, color: '#64748b' }}>Model cost-effective abatement pathways using PuLP/CBC solver</p>
         </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 24 }}>
-        {/* Left: interventions */}
+        {/* Left: input + results */}
         <div>
-          {/* Budget input */}
+          {/* Input card */}
           <div className="ct-card p-5 mb-5">
-            <div className="flex items-center gap-4">
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
               <div>
-                <label style={{ fontSize: 12, fontWeight: 600, color: '#64748b', display: 'block', marginBottom: 6, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Budget (₹)</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={budget}
-                    onChange={e => setBudget(e.target.value)}
-                    style={{ fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 700, color: '#0f172a', border: '1px solid #e2e8f0', borderRadius: 8, padding: '8px 14px', width: 180, outline: 'none' }}
-                  />
-                  <button style={{ background: '#0f172a', color: 'white', border: 'none', borderRadius: 8, padding: '9px 18px', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
-                    Optimize
-                  </button>
-                </div>
+                <label style={{ fontSize: 12, fontWeight: 600, color: '#64748b', display: 'block', marginBottom: 6, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                  Target Reduction (%)
+                </label>
+                <input
+                  type="number"
+                  min={0.01}
+                  max={100}
+                  step={0.1}
+                  value={targetPct}
+                  onChange={e => setTargetPct(e.target.value)}
+                  style={{ fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 700, color: '#0f172a', border: '1px solid #e2e8f0', borderRadius: 8, padding: '8px 14px', width: '100%', outline: 'none' }}
+                />
               </div>
-              <div style={{ flex: 1, background: '#f8fafc', borderRadius: 8, padding: '12px 16px' }}>
-                <p style={{ fontSize: 11, color: '#94a3b8', marginBottom: 4 }}>Budget utilization</p>
-                <div className="progress-bar" style={{ marginBottom: 6 }}>
-                  <div className="progress-fill" style={{ width: `${Math.min(100, (spent / budgetN) * 100)}%` }} />
-                </div>
-                <p style={{ fontSize: 12, color: '#334155', fontFamily: 'var(--font-mono)' }}>
-                  ₹{(spent / 1e6).toFixed(2)}M used of ₹{(budgetN / 1e6).toFixed(1)}M
-                </p>
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, color: '#64748b', display: 'block', marginBottom: 6, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                  Budget (₹)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={budgetInr}
+                  onChange={e => setBudgetInr(e.target.value)}
+                  style={{ fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 700, color: '#0f172a', border: '1px solid #e2e8f0', borderRadius: 8, padding: '8px 14px', width: '100%', outline: 'none' }}
+                />
               </div>
             </div>
+            <button
+              onClick={handleOptimize}
+              disabled={loading}
+              style={{ background: '#0f172a', color: 'white', border: 'none', borderRadius: 8, padding: '9px 24px', fontSize: 13, fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 6, opacity: loading ? 0.7 : 1 }}
+            >
+              {loading ? <><RefreshCw size={13} className="animate-spin" /> Optimizing…</> : <><Zap size={13} /> Run Optimizer</>}
+            </button>
           </div>
 
-          {/* Interventions list */}
-          <div className="ct-card">
-            <div style={{ padding: '12px 18px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: '#1e293b' }}>Reduction Interventions</span>
-              <span style={{ fontSize: 12, color: '#64748b' }}>{selected.size} selected · {interventions.length - selected.size} rejected</span>
-            </div>
-            {interventions.map((item, i) => {
-              const isSelected = selected.has(item.name)
-              return (
-                <div key={i} style={{ padding: '14px 18px', borderBottom: i < interventions.length - 1 ? '1px solid #f8fafc' : 'none', display: 'flex', alignItems: 'center', gap: 14, opacity: isSelected ? 1 : 0.5 }}>
-                  <button onClick={() => toggle(item.name)} style={{ width: 20, height: 20, borderRadius: 5, border: `2px solid ${isSelected ? '#059669' : '#cbd5e1'}`, background: isSelected ? '#059669' : 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    {isSelected && <Check size={11} color="white" />}
-                  </button>
+          {error && <ErrorBanner message={error} />}
+
+          {/* Recommendations */}
+          {result && result.recommendations.length > 0 && (
+            <div className="ct-card">
+              <div style={{ padding: '12px 18px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: '#1e293b' }}>Recommended Interventions</span>
+                <span style={{ fontSize: 12, color: '#64748b' }}>{result.recommendations.length} selected by solver</span>
+              </div>
+              {result.recommendations.map((item, i) => (
+                <div key={i} style={{ padding: '14px 18px', borderBottom: i < result.recommendations.length - 1 ? '1px solid #f8fafc' : 'none', display: 'flex', alignItems: 'center', gap: 14 }}>
+                  <div style={{ width: 24, height: 24, background: '#f0fdf4', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: '#059669' }}>{item.priority}</span>
+                  </div>
                   <div style={{ flex: 1 }}>
                     <div className="flex items-center justify-between mb-1">
-                      <span style={{ fontSize: 13, fontWeight: 500, color: '#1e293b' }}>{item.name}</span>
-                      <span style={{ fontSize: 11, fontWeight: 600, background: '#f0fdf4', color: '#065f46', padding: '2px 8px', borderRadius: 4, fontFamily: 'var(--font-mono)' }}>−{item.abatement} tCO₂e</span>
+                      <span style={{ fontSize: 13, fontWeight: 500, color: '#1e293b' }}>{item.action}</span>
+                      <span style={{ fontSize: 11, fontWeight: 600, background: '#f0fdf4', color: '#065f46', padding: '2px 8px', borderRadius: 4, fontFamily: 'var(--font-mono)' }}>
+                        −{(item.estimated_reduction_kgco2e / 1000).toFixed(2)} tCO₂e
+                      </span>
                     </div>
                     <div className="flex items-center gap-4">
-                      <span style={{ fontSize: 11, color: '#94a3b8' }}>Scope {item.scope}</span>
-                      <span style={{ fontSize: 11, color: '#94a3b8' }}>₹{(item.cost / 1e5).toFixed(1)}L capex</span>
-                      <span style={{ fontSize: 11, color: '#94a3b8' }}>₹{item.costPerKg}/kg CO₂e avoided</span>
+                      <span style={{ fontSize: 11, color: '#94a3b8' }}>₹{item.estimated_cost_inr.toLocaleString()} capex</span>
+                      <span style={{ fontSize: 11, color: '#94a3b8' }}>Priority: {item.priority}</span>
                     </div>
                   </div>
                 </div>
-              )
-            })}
-          </div>
+              ))}
+            </div>
+          )}
+
+          {result && result.recommendations.length === 0 && (
+            <EmptyState label="No interventions available for the given constraints." />
+          )}
         </div>
 
         {/* Right: summary + chart */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {/* Summary card */}
-          <div className="ct-card p-5">
-            <h3 style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', marginBottom: 16 }}>Optimization Summary</h3>
-            {[
-              { label: 'Total Abatement', value: `${total.toFixed(1)} tCO₂e`, highlight: true },
-              { label: 'Reduction vs Baseline', value: `${((total / 2847) * 100).toFixed(1)}%`, highlight: false },
-              { label: 'Budget Used', value: `₹${(spent / 1e6).toFixed(2)}M`, highlight: false },
-              { label: 'Budget Remaining', value: `₹${Math.max(0, (budgetN - spent) / 1e6).toFixed(2)}M`, highlight: false },
-              { label: 'Avg Cost / kg CO₂e', value: `₹${avgCost}`, highlight: false },
-            ].map(row => (
-              <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #f8fafc' }}>
-                <span style={{ fontSize: 12.5, color: '#64748b' }}>{row.label}</span>
-                <span style={{ fontSize: 13, fontWeight: 700, color: row.highlight ? '#059669' : '#1e293b', fontFamily: row.highlight ? 'var(--font-display)' : 'var(--font-mono)' }}>{row.value}</span>
+          {result && (
+            <div className="ct-card p-5">
+              <h3 style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', marginBottom: 16 }}>Optimization Summary</h3>
+              {[
+                { label: 'Current Emissions', value: `${(result.current_emissions_kgco2e / 1000).toFixed(2)} tCO₂e` },
+                { label: 'Target Reduction', value: `${result.target_reduction_percentage}%` },
+                { label: 'Required Reduction', value: `${(result.required_reduction_kgco2e / 1000).toFixed(2)} tCO₂e` },
+                { label: 'Optimized Reduction', value: `${(result.optimized_reduction_kgco2e / 1000).toFixed(2)} tCO₂e`, highlight: true },
+                { label: 'Residual Emissions', value: `${(result.residual_emissions_kgco2e / 1000).toFixed(2)} tCO₂e` },
+                { label: 'Budget Used', value: result.budget_used_inr ? `₹${result.budget_used_inr.toLocaleString()}` : '—' },
+                { label: 'Remaining Budget', value: result.remaining_budget_inr != null ? `₹${result.remaining_budget_inr.toLocaleString()}` : '—' },
+                { label: 'Target Achieved', value: result.target_achieved ? '✓ Yes' : '✗ No' },
+              ].map(row => (
+                <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #f8fafc' }}>
+                  <span style={{ fontSize: 12.5, color: '#64748b' }}>{row.label}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: (row as any).highlight ? '#059669' : '#1e293b', fontFamily: 'var(--font-mono)' }}>{row.value}</span>
+                </div>
+              ))}
+              <div style={{ marginTop: 12, padding: '8px 12px', background: result.target_achieved ? '#f0fdf4' : '#fef2f2', borderRadius: 6, border: `1px solid ${result.target_achieved ? '#bbf7d0' : '#fecaca'}` }}>
+                <p style={{ fontSize: 12, color: result.target_achieved ? '#065f46' : '#991b1b', fontWeight: 500 }}>
+                  {result.status}
+                </p>
               </div>
-            ))}
-          </div>
+            </div>
+          )}
+
+          {!result && (
+            <div className="ct-card p-5">
+              <h3 style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', marginBottom: 12 }}>Optimization Summary</h3>
+              <EmptyState label="Run the optimizer to see results." />
+            </div>
+          )}
 
           {/* Abatement chart */}
-          <div className="ct-card p-5">
-            <h3 style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', marginBottom: 14 }}>Abatement by Intervention</h3>
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={abatementData} layout="vertical" margin={{ top: 0, right: 10, left: 0, bottom: 0 }}>
-                <XAxis type="number" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-                <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} width={110} />
-                <Tooltip contentStyle={{ fontSize: 11, borderRadius: 6 }} formatter={(v) => [`${String(v)} tCO₂e`, "Abatement"]} />
-                <Bar dataKey="abatement" fill="#059669" radius={[0, 4, 4, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          {result && chartData.length > 0 && (
+            <div className="ct-card p-5">
+              <h3 style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', marginBottom: 14 }}>Abatement by Intervention (tCO₂e)</h3>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={chartData} layout="vertical" margin={{ top: 0, right: 10, left: 0, bottom: 0 }}>
+                  <XAxis type="number" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} width={110} />
+                  <Tooltip contentStyle={{ fontSize: 11, borderRadius: 6 }} formatter={(v) => [`${String(v)} tCO₂e`, "Abatement"]} />
+                  <Bar dataKey="abatement" fill="#059669" radius={[0, 4, 4, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -1118,24 +1300,50 @@ function Optimizer() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SCREEN 9: BRSR-style Report
+// SCREEN 9: BRSR-style Report — connected where possible
 // ─────────────────────────────────────────────────────────────────────────────
 
-const scopePieData = [
-  { name: 'Scope 1 — Direct', value: 342, color: '#0f172a' },
-  { name: 'Scope 2 — Energy', value: 891, color: '#059669' },
-  { name: 'Scope 3 — Value Chain', value: 1614, color: '#8b5cf6' },
-]
-
-const topSupplierData = [
-  { name: 'Tata Steel', value: 456 },
-  { name: 'MSIL Network', value: 244 },
-  { name: 'DHL Logistics', value: 187 },
-  { name: 'L&T Engineering', value: 89 },
-  { name: 'Hindalco', value: 76 },
-]
-
 function Report() {
+  const [summary, setSummary] = useState<CarbonSummary | null>(null)
+  const [verSummary, setVerSummary] = useState<VerificationSummary | null>(null)
+  const [aiExplanation, setAiExplanation] = useState<AIExplanationResponse | null>(null)
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiError, setAiError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    setLoading(true)
+    Promise.all([
+      getCarbonSummary(COMPANY_ID),
+      getVerificationSummary(COMPANY_ID),
+    ])
+      .then(([s, v]) => { setSummary(s); setVerSummary(v) })
+      .catch(() => { /* non-fatal — report still renders */ })
+      .finally(() => setLoading(false))
+  }, [])
+
+  const handleAIExplain = () => {
+    setAiLoading(true)
+    setAiError(null)
+    getAIExplanation({
+      context_type: 'summary',
+      context_id: COMPANY_ID,
+      question: 'Summarize the carbon emissions data for the executive report and suggest improvements.',
+    })
+      .then(setAiExplanation)
+      .catch(e => setAiError(e.message ?? 'AI explanation failed'))
+      .finally(() => setAiLoading(false))
+  }
+
+  const fmt = (n: number) => (n / 1000).toFixed(2)
+
+  const scopePieData = summary
+    ? [
+        { name: 'Primary Emissions', value: parseFloat((summary.primary_emissions_kgco2e / 1000).toFixed(2)), color: '#0f172a' },
+        { name: 'Estimated Emissions', value: parseFloat((summary.estimated_emissions_kgco2e / 1000).toFixed(2)), color: '#059669' },
+      ]
+    : []
+
   return (
     <div style={{ padding: '28px 32px' }}>
       {/* Report header */}
@@ -1144,13 +1352,13 @@ function Report() {
           <div>
             <div className="flex items-center gap-2 mb-3">
               <Leaf size={16} color="#34d399" />
-              <span style={{ fontSize: 11, color: '#34d399', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>CarbonTrace · BRSR-Aligned Report</span>
+              <span style={{ fontSize: 11, color: '#34d399', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>CarbonTrace · GHG Protocol-Aligned Report</span>
             </div>
             <h1 className="font-display" style={{ fontSize: 30, fontWeight: 600, color: 'white', marginBottom: 8, lineHeight: 1.2 }}>
               Greenhouse Gas Emissions<br />Disclosure Report
             </h1>
             <p style={{ fontSize: 14, color: '#94a3b8', marginTop: 8 }}>Meridian Industries Ltd. · Financial Year 2024–25</p>
-            <p style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>Prepared by CarbonTrace Intelligence Platform · September 2026</p>
+            <p style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>Prepared by CarbonTrace Intelligence Platform · GHG Protocol-aligned prototype</p>
           </div>
           <div className="flex gap-3">
             <button style={{ background: 'rgba(255,255,255,0.1)', color: '#e2e8f0', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 8, padding: '8px 16px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -1164,76 +1372,105 @@ function Report() {
         {/* Executive Summary */}
         <div className="report-section">
           <h2 className="font-display" style={{ fontSize: 20, fontWeight: 600, color: '#0f172a', marginBottom: 12 }}>1. Executive Summary</h2>
-          <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '16px 20px', marginBottom: 16 }}>
-            <p style={{ fontSize: 13, color: '#065f46', lineHeight: 1.7 }}>
-              <strong>AI-generated explanation of computed figures:</strong> Meridian Industries Ltd. recorded total GHG emissions of <strong>2,847 tCO₂e</strong> for FY 2024–25, representing an 8.4% reduction from the prior year. Scope 3 (value chain) accounts for 56.7% of total emissions, driven primarily by purchased steel, automotive components, and logistics. Primary data covers 62% of emission sources by weight; the remainder relies on spend-based or IPCC-factor estimates. Confidence-weighted data quality score is 84%.
-            </p>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
-            {[
-              { label: 'Total GHG Emissions', value: '2,847 tCO₂e', delta: '−8.4% YoY' },
-              { label: 'Data Quality Score', value: '84 / 100', delta: 'Primary: 62%' },
-              { label: 'Documents Analyzed', value: '143 files', delta: '287 data points' },
-            ].map(m => (
-              <div key={m.label} className="ct-card p-4">
-                <p style={{ fontSize: 11, color: '#64748b', marginBottom: 4, fontWeight: 500 }}>{m.label}</p>
-                <p style={{ fontSize: 20, fontWeight: 700, color: '#0f172a', fontFamily: 'var(--font-display)' }}>{m.value}</p>
-                <p style={{ fontSize: 11, color: '#059669', marginTop: 4, fontWeight: 500 }}>{m.delta}</p>
-              </div>
-            ))}
-          </div>
-        </div>
 
-        {/* Scope Breakdown */}
-        <div className="report-section">
-          <h2 className="font-display" style={{ fontSize: 20, fontWeight: 600, color: '#0f172a', marginBottom: 16 }}>2. Emissions by Scope</h2>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
-            <div>
+          {/* AI explanation */}
+          <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '16px 20px', marginBottom: 16 }}>
+            {aiExplanation ? (
+              <>
+                <p style={{ fontSize: 11, fontWeight: 600, color: '#059669', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
+                  🤖 AI-generated explanation {aiExplanation.is_fallback ? '(fallback — AI unavailable)' : ''}
+                </p>
+                <p style={{ fontSize: 13, color: '#065f46', lineHeight: 1.7 }}>{aiExplanation.explanation}</p>
+              </>
+            ) : (
+              <div className="flex items-center gap-3">
+                <Info size={14} color="#059669" />
+                <span style={{ fontSize: 13, color: '#065f46' }}>
+                  {loading ? 'Loading emissions data…' : summary
+                    ? `Total GHG emissions: ${fmt(summary.total_emissions_kgco2e)} tCO₂e · Primary data: ${summary.primary_data_percentage.toFixed(1)}%`
+                    : 'Seed demo data and reload to see live figures.'}
+                </span>
+                {!aiLoading && !aiExplanation && summary && (
+                  <button
+                    onClick={handleAIExplain}
+                    style={{ marginLeft: 'auto', background: '#059669', color: 'white', border: 'none', borderRadius: 6, padding: '6px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 5 }}
+                  >
+                    <Star size={12} /> Generate AI Explanation
+                  </button>
+                )}
+                {aiLoading && <RefreshCw size={13} color="#059669" className="animate-spin" style={{ marginLeft: 'auto' }} />}
+              </div>
+            )}
+            {aiError && <p style={{ fontSize: 12, color: '#dc2626', marginTop: 8 }}>{aiError}</p>}
+          </div>
+
+          {summary && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
               {[
-                { scope: 'Scope 1', desc: 'Direct emissions from owned / controlled sources', value: 342, pct: 12.0, color: '#0f172a', items: ['Diesel combustion — fleet operations', 'LPG combustion — plant heating', 'Company-owned vehicles'] },
-                { scope: 'Scope 2', desc: 'Indirect emissions from purchased electricity', value: 891, pct: 31.3, color: '#059669', items: ['Grid electricity — Plant Kochi (KSEB)', 'Grid electricity — Plant Pune (MSEDCL)', 'Corporate offices'] },
-                { scope: 'Scope 3', desc: 'All other indirect value chain emissions', value: 1614, pct: 56.7, color: '#8b5cf6', items: ['Purchased goods and services', 'Upstream transportation', 'Business travel', 'Waste in operations'] },
-              ].map(s => (
-                <div key={s.scope} style={{ marginBottom: 20 }}>
-                  <div className="flex items-center justify-between mb-6">
-                    <div>
-                      <span style={{ fontSize: 14, fontWeight: 700, color: s.color }}>{s.scope}</span>
-                      <span style={{ fontSize: 12, color: '#64748b', marginLeft: 8 }}>{s.desc}</span>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <span style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', fontFamily: 'var(--font-display)' }}>{s.value} tCO₂e</span>
-                      <span style={{ fontSize: 11, color: '#94a3b8', display: 'block' }}>{s.pct}% of total</span>
-                    </div>
-                  </div>
-                  <ul style={{ paddingLeft: 16, marginTop: -12 }}>
-                    {s.items.map(it => <li key={it} style={{ fontSize: 12, color: '#64748b', marginBottom: 3 }}>{it}</li>)}
-                  </ul>
+                { label: 'Total GHG Emissions', value: `${fmt(summary.total_emissions_kgco2e)} tCO₂e`, delta: 'From database' },
+                { label: 'Primary Data Coverage', value: `${summary.primary_data_percentage.toFixed(1)}%`, delta: 'Direct measurement' },
+                { label: 'Flagged Records', value: `${summary.flagged_entries_count}`, delta: 'Needs review' },
+              ].map(m => (
+                <div key={m.label} className="ct-card p-4">
+                  <p style={{ fontSize: 11, color: '#64748b', marginBottom: 4, fontWeight: 500 }}>{m.label}</p>
+                  <p style={{ fontSize: 20, fontWeight: 700, color: '#0f172a', fontFamily: 'var(--font-display)' }}>{m.value}</p>
+                  <p style={{ fontSize: 11, color: '#059669', marginTop: 4, fontWeight: 500 }}>{m.delta}</p>
                 </div>
               ))}
             </div>
-            <div>
-              <ResponsiveContainer width="100%" height={240}>
-                <PieChart>
-                  <Pie data={scopePieData} cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={3} dataKey="value">
-                    {scopePieData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
-                  </Pie>
-                  <Tooltip formatter={(v) => [`${String(v)} tCO₂e`, '']} contentStyle={{ fontSize: 11, borderRadius: 6 }} />
-                  <Legend iconType="square" iconSize={10} formatter={(v) => <span style={{ fontSize: 12 }}>{v}</span>} />
-                </PieChart>
-              </ResponsiveContainer>
+          )}
+        </div>
+
+        {/* Scope Breakdown */}
+        {summary && (
+          <div className="report-section">
+            <h2 className="font-display" style={{ fontSize: 20, fontWeight: 600, color: '#0f172a', marginBottom: 16 }}>2. Emissions Breakdown</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+              <div>
+                {[
+                  { label: 'Primary Emissions', desc: 'Direct measurement data', value: summary.primary_emissions_kgco2e, color: '#0f172a' },
+                  { label: 'Estimated Emissions', desc: 'Factor-based / modelled data', value: summary.estimated_emissions_kgco2e, color: '#059669' },
+                ].map(s => (
+                  <div key={s.label} style={{ marginBottom: 20 }}>
+                    <div className="flex items-center justify-between mb-6">
+                      <div>
+                        <span style={{ fontSize: 14, fontWeight: 700, color: s.color }}>{s.label}</span>
+                        <span style={{ fontSize: 12, color: '#64748b', marginLeft: 8 }}>{s.desc}</span>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <span style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', fontFamily: 'var(--font-display)' }}>{fmt(s.value)} tCO₂e</span>
+                        <span style={{ fontSize: 11, color: '#94a3b8', display: 'block' }}>
+                          {((s.value / summary.total_emissions_kgco2e) * 100).toFixed(1)}% of total
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div>
+                <ResponsiveContainer width="100%" height={240}>
+                  <PieChart>
+                    <Pie data={scopePieData} cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={3} dataKey="value">
+                      {scopePieData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+                    </Pie>
+                    <Tooltip formatter={(v) => [`${String(v)} tCO₂e`, '']} contentStyle={{ fontSize: 11, borderRadius: 6 }} />
+                    <Legend iconType="square" iconSize={10} formatter={(v) => <span style={{ fontSize: 12 }}>{v}</span>} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* Methodology */}
         <div className="report-section">
           <h2 className="font-display" style={{ fontSize: 20, fontWeight: 600, color: '#0f172a', marginBottom: 12 }}>3. Methodology</h2>
           <p style={{ fontSize: 13, color: '#334155', lineHeight: 1.75, marginBottom: 12 }}>
-            Emissions were calculated in accordance with the <strong>GHG Protocol Corporate Accounting and Reporting Standard</strong> and the <strong>BRSR Core Framework</strong> (SEBI, 2023). Activity data was extracted automatically from 143 uploaded business documents using CarbonTrace's AI extraction engine. Emission factors sourced from IPCC AR6, CEA Grid Emission Factor (FY 2023-24), and supplier-disclosed LCA data where available.
+            Emissions were calculated in accordance with the <strong>GHG Protocol Corporate Accounting and Reporting Standard</strong>. Activity data was extracted from business documents. Emission factors sourced from IPCC AR6, CEA Grid Emission Factor (FY 2023-24), and supplier-disclosed LCA data where available.
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
             {[
-              { label: 'Standard', value: 'GHG Protocol + BRSR Core' },
+              { label: 'Standard', value: 'GHG Protocol-aligned prototype' },
               { label: 'Base Year', value: 'FY 2023–24' },
               { label: 'Reporting Boundary', value: 'Operational Control' },
             ].map(m => (
@@ -1245,65 +1482,9 @@ function Report() {
           </div>
         </div>
 
-        {/* Top Suppliers */}
-        <div className="report-section">
-          <h2 className="font-display" style={{ fontSize: 20, fontWeight: 600, color: '#0f172a', marginBottom: 16 }}>4. Scope 3 / Value Chain — Top Suppliers</h2>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
-            <div>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
-                <thead>
-                  <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                    <th style={{ padding: '9px 12px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Supplier</th>
-                    <th style={{ padding: '9px 12px', textAlign: 'right', fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>tCO₂e</th>
-                    <th style={{ padding: '9px 12px', textAlign: 'center', fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Data</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {suppliers.map((s, i) => (
-                    <tr key={i} style={{ borderBottom: '1px solid #f8fafc' }}>
-                      <td style={{ padding: '10px 12px', color: '#1e293b', fontWeight: 500 }}>{s.name}</td>
-                      <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: '#0f172a' }}>{s.emissions.toFixed(1)}</td>
-                      <td style={{ padding: '10px 12px', textAlign: 'center' }}>{s.dataType === 'primary' ? <PrimaryBadge /> : <EstimatedBadge />}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div>
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={topSupplierData} margin={{ top: 0, right: 0, left: -20, bottom: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} angle={-20} textAnchor="end" />
-                  <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-                  <Tooltip contentStyle={{ fontSize: 11, borderRadius: 6 }} formatter={(v) => [`${String(v)} tCO₂e`, 'Emissions']} />
-                  <Bar dataKey="value" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </div>
-
-        {/* Data Quality */}
-        <div className="report-section">
-          <h2 className="font-display" style={{ fontSize: 20, fontWeight: 600, color: '#0f172a', marginBottom: 12 }}>5. Data Quality Assessment</h2>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginBottom: 14 }}>
-            {[
-              { label: 'Primary Data Coverage', value: '62%', badge: <PrimaryBadge /> },
-              { label: 'Estimated / Modelled', value: '27%', badge: <EstimatedBadge /> },
-              { label: 'Missing / Flagged', value: '11%', badge: <FlaggedBadge /> },
-            ].map(m => (
-              <div key={m.label} className="ct-card p-4">
-                <div className="flex items-center justify-between mb-2">{m.badge}</div>
-                <p style={{ fontSize: 20, fontWeight: 700, color: '#0f172a', fontFamily: 'var(--font-display)' }}>{m.value}</p>
-                <p style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>{m.label}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
         {/* Assurance + Verification */}
         <div className="report-section">
-          <h2 className="font-display" style={{ fontSize: 20, fontWeight: 600, color: '#0f172a', marginBottom: 12 }}>6. Assurance Statement</h2>
+          <h2 className="font-display" style={{ fontSize: 20, fontWeight: 600, color: '#0f172a', marginBottom: 12 }}>4. Assurance Statement</h2>
           <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '20px 24px', marginBottom: 14 }}>
             <div className="flex items-start gap-3">
               <Shield size={18} color="#059669" style={{ flexShrink: 0, marginTop: 2 }} />
@@ -1312,40 +1493,30 @@ function Report() {
                   "This platform provides audit-ready data; it does not replace statutory third-party assurance."
                 </p>
                 <p style={{ fontSize: 12, color: '#64748b', lineHeight: 1.65 }}>
-                  All emission records have been cryptographically hashed and appended to an immutable audit ledger (847 blocks, chain integrity verified 100%). Source traceability is maintained from raw document to reported figure. Independent third-party limited or reasonable assurance is recommended for statutory reporting under SEBI BRSR Core requirements.
+                  All emission records have been cryptographically hashed and appended to a tamper-evident SHA-256 hash-chain ledger. Source traceability is maintained from activity record to reported figure. Independent third-party limited or reasonable assurance is recommended for statutory reporting.
                 </p>
               </div>
             </div>
           </div>
-          <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '12px 16px' }}>
-            <p style={{ fontSize: 12, color: '#065f46', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Lock size={13} /> <strong>Verification:</strong> Chain verified · 847 blocks · Hash: 0x1b8e...4f91 · Last verified: 30 Sep 2026
-            </p>
-          </div>
+          {verSummary && (
+            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '12px 16px' }}>
+              <p style={{ fontSize: 12, color: '#065f46', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Lock size={13} /> <strong>Verification:</strong> SHA-256 hash-chain · {verSummary.total_entries} entries · {verSummary.verification_percentage.toFixed(0)}% integrity · Last verified on load
+              </p>
+            </div>
+          )}
         </div>
 
-        {/* Action Plan */}
-        <div style={{ paddingBottom: 0 }}>
-          <h2 className="font-display" style={{ fontSize: 20, fontWeight: 600, color: '#0f172a', marginBottom: 12 }}>7. Recommended Action Plan</h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {[
-              { priority: 'High', action: 'Switch KSEB supply to Green Tariff / renewable energy procurement', abatement: '−142 tCO₂e', timeline: 'Q1 FY25-26' },
-              { priority: 'High', action: 'Initiate Scope 3 data collection from Tata Steel and L&T Engineering', abatement: 'Quality uplift', timeline: 'Q2 FY25-26' },
-              { priority: 'Medium', action: 'Deploy rooftop solar at Plant Kochi (800 kWp)', abatement: '−87 tCO₂e', timeline: 'Q3 FY25-26' },
-              { priority: 'Medium', action: 'Fleet electrification — Phase 1 (20 vehicles)', abatement: '−95 tCO₂e', timeline: 'Q2–Q3 FY25-26' },
-              { priority: 'Low', action: 'Submit for third-party limited assurance under BRSR Core', abatement: 'Compliance', timeline: 'Q4 FY25-26' },
-            ].map((a, i) => (
-              <div key={i} style={{ display: 'flex', gap: 14, padding: '12px 16px', background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0' }}>
-                <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 4, height: 'fit-content', flexShrink: 0, background: a.priority === 'High' ? '#fee2e2' : a.priority === 'Medium' ? '#fef3c7' : '#f0fdf4', color: a.priority === 'High' ? '#991b1b' : a.priority === 'Medium' ? '#92400e' : '#065f46' }}>{a.priority}</span>
-                <div style={{ flex: 1 }}>
-                  <p style={{ fontSize: 13, color: '#1e293b', fontWeight: 500 }}>{a.action}</p>
-                </div>
-                <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                  <p style={{ fontSize: 12, fontWeight: 600, color: '#059669' }}>{a.abatement}</p>
-                  <p style={{ fontSize: 11, color: '#94a3b8' }}>{a.timeline}</p>
-                </div>
-              </div>
-            ))}
+        {/* BRSR gap note */}
+        <div style={{ background: '#fef9c3', border: '1px solid #fde047', borderRadius: 10, padding: '16px 20px', marginBottom: 24 }}>
+          <div className="flex items-start gap-3">
+            <Info size={16} color="#854d0e" style={{ flexShrink: 0, marginTop: 2 }} />
+            <div>
+              <p style={{ fontSize: 13, fontWeight: 600, color: '#854d0e', marginBottom: 4 }}>BRSR Full Report — Not Yet Implemented</p>
+              <p style={{ fontSize: 12, color: '#713f12', lineHeight: 1.65 }}>
+                The full BRSR Compliance Report (Scope 1/2/3 breakdown by GHG category, regulatory disclosure tables, statutory assurance sections) requires a dedicated backend report endpoint that is not currently implemented. The data shown above is directly sourced from the PostgreSQL database via the CarbonTrace API.
+              </p>
+            </div>
           </div>
         </div>
       </div>
@@ -1364,8 +1535,8 @@ const tickerItems = [
   '✓ Air_Travel_Corporate.docx · 18.48 tCO₂e',
   '✓ MSIL_Supplier_2024.xlsx · PRIMARY data · 94% confidence',
   '✓ Water_Consumption.csv · Scope 3 · 2.20 tCO₂e',
-  '⬡ Block #847 sealed · Hash 0x1b8e...4f91 · Chain intact',
-  '⬡ Block #846 verified · Hash 0xa3f9...d7c2',
+  '⬡ Block #1 sealed · Hash-chain intact',
+  '⬡ SHA-256 ledger verified · All entries OK',
 ]
 
 const orbs = [
@@ -1638,7 +1809,7 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
           <div style={{ marginTop: 24, background: 'linear-gradient(135deg, #f0fdf4, #ecfdf5)', border: '1px solid #bbf7d0', borderRadius: 10, padding: '12px 16px' }}>
             <p style={{ fontSize: 12.5, color: '#065f46', display: 'flex', alignItems: 'center', gap: 6 }}>
               <CheckCircle size={13} color="#059669" />
-              <span><strong>Free 14-day trial</strong> · No credit card · BRSR & GHG Protocol ready</span>
+              <span><strong>Free 14-day trial</strong> · No credit card · GHG Protocol &amp; BRSR ready</span>
             </p>
           </div>
 
@@ -1660,15 +1831,15 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const screenMeta: Record<Screen, { title: string; sub?: string }> = {
-  dashboard: { title: 'Dashboard', sub: 'FY 2024–25 · 143 documents analyzed' },
+  dashboard: { title: 'Dashboard', sub: 'FY 2024–25 · GHG Protocol-aligned prototype' },
   upload: { title: 'Upload & Analyze', sub: 'Extract carbon data from your existing business documents' },
   processing: { title: 'Document Processing', sub: 'AI extraction in progress' },
   review: { title: 'Extracted Data Review', sub: 'Review and accept AI-extracted records before they enter your carbon ledger' },
-  carbon: { title: 'Carbon Data', sub: 'All emission records — extracted and manual' },
+  carbon: { title: 'Carbon Data', sub: 'All emission records — from database' },
   suppliers: { title: 'Suppliers & Supply Chain', sub: 'Scope 3 value chain management' },
-  verification: { title: 'Verification Ledger', sub: 'Cryptographic audit trail' },
+  verification: { title: 'Verification Ledger', sub: 'SHA-256 hash-chain audit trail' },
   optimizer: { title: 'Reduction Optimizer', sub: 'Model cost-effective abatement pathways' },
-  report: { title: 'BRSR Emissions Report', sub: 'Meridian Industries Ltd. · FY 2024–25' },
+  report: { title: 'GHG Emissions Report', sub: 'Meridian Industries Ltd. · FY 2024–25' },
 }
 
 export default function App() {
