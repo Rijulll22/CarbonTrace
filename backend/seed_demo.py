@@ -381,6 +381,129 @@ def get_demo_dataset() -> dict[str, Any]:
     }
 
 
+def seed_demo_data(db: Any) -> dict[str, Any]:
+    """
+    Persist the deterministic CarbonTrace demo dataset into the database
+    and register corresponding cryptographic verification blocks in the
+    verification ledger.
+
+    Uses real database IDs for verification records and maintains idempotency.
+    """
+    import models
+    import verification
+
+    # 1. Ensure Demo Company exists
+    company = db.query(models.Company).filter(models.Company.company_id == DEMO_COMPANY["id"]).first()
+    if not company:
+        company = models.Company(
+            company_id=DEMO_COMPANY["id"],
+            company_name=DEMO_COMPANY["name"],
+            industry="Manufacturing",
+            location="Tamil Nadu, India",
+        )
+        db.add(company)
+        db.commit()
+        db.refresh(company)
+
+    # 2. Ensure Demo Suppliers exist
+    supplier_map: dict[str, int] = {}
+    for sup in DEMO_SUPPLIERS:
+        existing_sup = (
+            db.query(models.Supplier)
+            .filter(
+                models.Supplier.company_id == DEMO_COMPANY["id"],
+                models.Supplier.supplier_name == sup["name"],
+            )
+            .first()
+        )
+        if not existing_sup:
+            existing_sup = models.Supplier(
+                company_id=DEMO_COMPANY["id"],
+                supplier_name=sup["name"],
+                industry=sup.get("industry"),
+                location=sup.get("location"),
+                is_verified=sup.get("is_verified", False),
+            )
+            db.add(existing_sup)
+            db.commit()
+            db.refresh(existing_sup)
+        supplier_map[sup["name"]] = existing_sup.supplier_id
+
+    # 3. Clean previous demo activities for this company to ensure clean idempotency
+    existing_activities = (
+        db.query(models.CarbonActivity)
+        .filter(models.CarbonActivity.company_id == DEMO_COMPANY["id"])
+        .all()
+    )
+    for act in existing_activities:
+        db.delete(act)
+    db.commit()
+
+    # Reset in-memory verification ledger
+    verification.ledger.reset_ledger()
+
+    # 4. Persist Carbon Activities and create verification ledger entries
+    seeded_activities: list[models.CarbonActivity] = []
+    for activity in DEMO_ACTIVITIES:
+        emissions = calculate_demo_emissions(activity)
+
+        assigned_supplier_id = None
+        if "supplier" in activity.activity_key:
+            assigned_supplier_id = supplier_map.get("Supplier A")
+
+        act_record = models.CarbonActivity(
+            company_id=DEMO_COMPANY["id"],
+            supplier_id=assigned_supplier_id,
+            activity_type=activity.activity_type,
+            activity_quantity=activity.quantity,
+            activity_unit=activity.unit,
+            emission_factor=activity.emission_factor,
+            emissions_kgco2e=round(emissions, 4),
+            is_primary=activity.is_primary,
+            is_flagged=False,
+        )
+        db.add(act_record)
+        db.commit()
+        db.refresh(act_record)
+        seeded_activities.append(act_record)
+
+        # Build verification payload and register in ledger with real DB entry_id
+        hash_payload = {
+            "entry_id": act_record.entry_id,
+            "company_id": act_record.company_id,
+            "activity_type": act_record.activity_type,
+            "activity_quantity": act_record.activity_quantity,
+            "activity_unit": act_record.activity_unit,
+            "emission_factor": act_record.emission_factor,
+            "emissions_kgco2e": act_record.emissions_kgco2e,
+            "is_primary": act_record.is_primary,
+        }
+        data_hash = verification.compute_data_hash(hash_payload)
+        verification.ledger.add_entry(
+            entry_type=f"carbon_activity_{activity.activity_key}",
+            source_id=act_record.entry_id,
+            data_hash=data_hash,
+            is_primary=act_record.is_primary,
+            metadata={
+                "company_id": act_record.company_id,
+                "activity_key": activity.activity_key,
+                "category": activity.category,
+                "is_flagged": act_record.is_flagged,
+            },
+        )
+
+    return {
+        "status": "seeded",
+        "company_id": DEMO_COMPANY["id"],
+        "company_name": DEMO_COMPANY["name"],
+        "activities_seeded": len(seeded_activities),
+        "suppliers_seeded": len(supplier_map),
+        "total_emissions_kgco2e": sum(a.emissions_kgco2e for a in seeded_activities),
+        "ledger_entries_count": len(verification.ledger.list_entries()),
+        "message": "Demo data successfully seeded into database and verification ledger.",
+    }
+
+
 if __name__ == "__main__":
     dataset = get_demo_dataset()
 

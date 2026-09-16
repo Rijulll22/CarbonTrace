@@ -1,0 +1,10 @@
+{
+  "description": "CarbonTrace is an intelligent carbon-accounting platform that automates carbon footprint analysis for businesses by extracting data from existing documents.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

@@ -42,6 +42,89 @@ MAX_ACTIVITY_QUANTITY = 1_000_000_000.0
 
 
 # ============================================================
+# EMISSION FACTORS & BENCHMARKS (CENTRALIZED REPOSITORY)
+# Formula: emissions_kgco2e = activity_quantity * emission_factor
+# ============================================================
+
+# Standard units
+UNIT_KWH = "kWh"
+UNIT_TON_KM = "ton_km"
+UNIT_TONS = "tons"
+UNIT_KG = "kg"
+UNIT_LITERS = "liters"
+
+# Status for emission factor governance
+FACTOR_STATUS_APPROVED = "approved"
+FACTOR_STATUS_PENDING_APPROVAL = "pending_approved_source"
+
+# Centralized dictionary of emission factors for deterministic calculation
+# Values for baseline demo records correspond directly to verified baseline standards
+# (e.g. CEA Grid Factor India, GLEC Framework, DEFRA secondary averages).
+EMISSION_FACTORS: dict[str, dict[str, object]] = {
+    # Scope 2 - Purchased Electricity (India Central Electricity Authority CO2 baseline)
+    "electricity_consumption": {
+        "activity_type": "electricity_consumption",
+        "factor": 0.716,  # 0.716 kgCO2e per kWh
+        "unit": UNIT_KWH,
+        "factor_unit": f"{UNIT_KGCO2E}/{UNIT_KWH}",
+        "scope": "Scope 2",
+        "source": "CEA India CO2 Baseline Database v19 / Tata Power benchmark",
+        "status": FACTOR_STATUS_APPROVED,
+    },
+    # Scope 3 Category 4 - Upstream Freight / Inbound Logistics (GLEC Framework Average)
+    "inbound_logistics": {
+        "activity_type": "inbound_logistics",
+        "factor": 0.115,  # 4830 kgCO2e / 42000 ton_km = 0.115 kgCO2e per ton_km
+        "unit": UNIT_TON_KM,
+        "factor_unit": f"{UNIT_KGCO2E}/{UNIT_TON_KM}",
+        "scope": "Scope 3",
+        "source": "GLEC Framework Average (Diesel road transport)",
+        "status": FACTOR_STATUS_APPROVED,
+    },
+    # Scope 3 Category 1 - Raw Materials: Hot Rolled Coil Steel (Primary verified supplier factor)
+    "raw_materials_steel": {
+        "activity_type": "raw_materials_steel",
+        "factor": 1820.0,  # 1.82 tCO2e/t = 1820 kgCO2e per ton (450 tons = 819,000 kgCO2e)
+        "unit": UNIT_TONS,
+        "factor_unit": f"{UNIT_KGCO2E}/{UNIT_TONS}",
+        "scope": "Scope 3",
+        "source": "JSW Steel Primary Supplier EPD / Baseline Record",
+        "status": FACTOR_STATUS_APPROVED,
+    },
+    # Scope 3 Category 1 - Packaging: Recycled Kraft Board (DEFRA / secondary industry benchmark)
+    "packaging_corrugated": {
+        "activity_type": "packaging_corrugated",
+        "factor": 0.94,  # 0.94 kgCO2e per kg (15,000 kg = 14,100 kgCO2e)
+        "unit": UNIT_KG,
+        "factor_unit": f"{UNIT_KGCO2E}/{UNIT_KG}",
+        "scope": "Scope 3",
+        "source": "DEFRA / Industry Secondary Benchmark Average",
+        "status": FACTOR_STATUS_APPROVED,
+    },
+    # Scope 1 - Stationary Combustion (Diesel Genset) - explicit placeholder awaiting approved factor
+    "stationary_combustion_diesel": {
+        "activity_type": "stationary_combustion_diesel",
+        "factor": None,  # Requires approved factor source (e.g. IPCC 2006 / MoEFCC)
+        "unit": UNIT_LITERS,
+        "factor_unit": f"{UNIT_KGCO2E}/{UNIT_LITERS}",
+        "scope": "Scope 1",
+        "source": "PENDING_APPROVED_FACTOR: Requires official MoEFCC/IPCC guideline approval",
+        "status": FACTOR_STATUS_PENDING_APPROVAL,
+    },
+    # Scope 1 - Mobile Fleet (Petrol) - explicit placeholder awaiting approved factor
+    "mobile_combustion_petrol": {
+        "activity_type": "mobile_combustion_petrol",
+        "factor": None,
+        "unit": UNIT_LITERS,
+        "factor_unit": f"{UNIT_KGCO2E}/{UNIT_LITERS}",
+        "scope": "Scope 1",
+        "source": "PENDING_APPROVED_FACTOR: Requires official MoEFCC/IPCC guideline approval",
+        "status": FACTOR_STATUS_PENDING_APPROVAL,
+    },
+}
+
+
+# ============================================================
 # OPTIMIZATION
 # ============================================================
 
