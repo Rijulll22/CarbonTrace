@@ -1,10 +1,1 @@
-fastapi
-uvicorn[standard]
-pydantic
-sqlalchemy
-psycopg2-binary
-pulp
-pandas
-openai
-python-dotenv
-pytest
+
