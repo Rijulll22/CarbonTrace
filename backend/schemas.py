@@ -12,19 +12,12 @@ Naming conventions:
 - Dates/timestamps use ISO 8601 strings
 """
 
-from datetime import datetime
-from typing import Any, Literal
+from typing import Any
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field
 
-
-# ============================================================
-# COMMON
-# ============================================================
 
 class APIError(BaseModel):
-    """Standard API error response."""
-
     detail: str
     code: str
 
@@ -34,13 +27,11 @@ class HealthResponse(BaseModel):
     service: str
 
 
-# ============================================================
-# CARBON / EMISSIONS
-# ============================================================
+# ---------------------------------------------------------------------------
+# Carbon Activity
+# ---------------------------------------------------------------------------
 
 class CarbonActivityCreate(BaseModel):
-    """Input for calculating emissions from an activity."""
-
     company_id: int
     activity_type: str
     activity_quantity: float = Field(gt=0)
@@ -51,8 +42,6 @@ class CarbonActivityCreate(BaseModel):
 
 
 class CarbonActivityResponse(BaseModel):
-    """Calculated carbon activity result."""
-
     entry_id: int
     company_id: int
     activity_type: str
@@ -64,8 +53,6 @@ class CarbonActivityResponse(BaseModel):
 
 
 class CarbonSummaryResponse(BaseModel):
-    """Aggregated carbon summary."""
-
     company_id: int
     total_emissions_kgco2e: float
     primary_emissions_kgco2e: float
@@ -74,13 +61,11 @@ class CarbonSummaryResponse(BaseModel):
     flagged_entries_count: int
 
 
-# ============================================================
-# SUPPLIERS / SUPPLY CHAIN
-# ============================================================
+# ---------------------------------------------------------------------------
+# Suppliers
+# ---------------------------------------------------------------------------
 
 class SupplierCreate(BaseModel):
-    """Create a supplier."""
-
     supplier_name: str
     company_id: int
     industry: str | None = None
@@ -88,8 +73,6 @@ class SupplierCreate(BaseModel):
 
 
 class SupplierResponse(BaseModel):
-    """Supplier response."""
-
     supplier_id: int
     supplier_name: str
     company_id: int
@@ -99,8 +82,6 @@ class SupplierResponse(BaseModel):
 
 
 class SupplierEmissionResponse(BaseModel):
-    """Supplier carbon information."""
-
     supplier_id: int
     supplier_name: str
     emissions_kgco2e: float
@@ -109,13 +90,11 @@ class SupplierEmissionResponse(BaseModel):
     is_verified: bool
 
 
-# ============================================================
-# VERIFICATION / TRUST
-# ============================================================
+# ---------------------------------------------------------------------------
+# Verification
+# ---------------------------------------------------------------------------
 
 class VerificationEntryCreate(BaseModel):
-    """Create an entry in the verification ledger."""
-
     entry_type: str
     source_id: int
     data_hash: str
@@ -124,8 +103,6 @@ class VerificationEntryCreate(BaseModel):
 
 
 class VerificationEntryResponse(BaseModel):
-    """Single verification ledger entry."""
-
     entry_id: int
     entry_type: str
     source_id: int
@@ -138,8 +115,6 @@ class VerificationEntryResponse(BaseModel):
 
 
 class VerificationResult(BaseModel):
-    """Result of an integrity verification."""
-
     is_verified: bool
     checked_entries: int
     invalid_entries: list[int] = Field(default_factory=list)
@@ -147,8 +122,6 @@ class VerificationResult(BaseModel):
 
 
 class VerificationSummaryResponse(BaseModel):
-    """Trust/verification summary."""
-
     company_id: int
     total_entries: int
     verified_entries: int
@@ -158,13 +131,13 @@ class VerificationSummaryResponse(BaseModel):
     verification_percentage: float
 
 
-# ============================================================
-# BLOCKCHAIN / CARBON RETIREMENT
-# ============================================================
+# ---------------------------------------------------------------------------
+# Carbon Retirement
+# ---------------------------------------------------------------------------
+# Kept for API compatibility with the shared contract.
+# Retirement/settlement is NOT part of the current CarbonTrace implementation.
 
 class CarbonRetirementCreate(BaseModel):
-    """Request to record/reference a carbon retirement."""
-
     company_id: int
     amount_kgco2e: float = Field(gt=0)
     certificate_id: str | None = None
@@ -172,8 +145,6 @@ class CarbonRetirementCreate(BaseModel):
 
 
 class CarbonRetirementResponse(BaseModel):
-    """Carbon retirement result."""
-
     retirement_id: str
     company_id: int
     amount_kgco2e: float
@@ -183,13 +154,11 @@ class CarbonRetirementResponse(BaseModel):
     status: str
 
 
-# ============================================================
-# OPTIMIZATION
-# ============================================================
+# ---------------------------------------------------------------------------
+# Optimization
+# ---------------------------------------------------------------------------
 
 class OptimizationRequest(BaseModel):
-    """Request for carbon reduction optimization."""
-
     company_id: int
     target_reduction_percentage: float = Field(
         gt=0,
@@ -199,8 +168,6 @@ class OptimizationRequest(BaseModel):
 
 
 class OptimizationRecommendation(BaseModel):
-    """Single optimization recommendation."""
-
     action: str
     estimated_reduction_kgco2e: float
     estimated_cost_inr: float
@@ -208,30 +175,39 @@ class OptimizationRecommendation(BaseModel):
 
 
 class OptimizationResponse(BaseModel):
-    """Optimization result."""
-
     company_id: int
+
     current_emissions_kgco2e: float
     target_reduction_percentage: float
-    recommendations: list[OptimizationRecommendation]
+
+    target_emissions_kgco2e: float
+    required_reduction_kgco2e: float
+    optimized_reduction_kgco2e: float
+
     projected_emissions_kgco2e: float
+    residual_emissions_kgco2e: float
+
+    budget_inr: float | None
+    budget_used_inr: float
+    remaining_budget_inr: float | None
+
+    target_achieved: bool
+    status: str
+
+    recommendations: list[OptimizationRecommendation]
 
 
-# ============================================================
-# REPORTS / CERTIFICATES
-# ============================================================
+# ---------------------------------------------------------------------------
+# Reporting
+# ---------------------------------------------------------------------------
 
 class ReportRequest(BaseModel):
-    """Request for a carbon report."""
-
     company_id: int
     include_verification: bool = True
     include_supplier_data: bool = True
 
 
 class ReportResponse(BaseModel):
-    """Generated report information."""
-
     report_id: str
     company_id: int
     report_type: str
@@ -239,20 +215,16 @@ class ReportResponse(BaseModel):
     download_url: str | None = None
 
 
-# ============================================================
-# AI EXPLANATION
-# ============================================================
+# ---------------------------------------------------------------------------
+# AI Explanation
+# ---------------------------------------------------------------------------
 
 class AIExplanationRequest(BaseModel):
-    """Request for an AI-generated explanation."""
-
     context_type: str
     context_id: int | None = None
     question: str
 
 
 class AIExplanationResponse(BaseModel):
-    """AI explanation response."""
-
     explanation: str
     is_fallback: bool = False
