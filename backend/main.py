@@ -6,9 +6,11 @@ Person 2's Verification & Trust Layer, and mounting core API routers.
 """
 
 from contextlib import asynccontextmanager
+import csv
+from io import StringIO
 from typing import Any
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, status
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
@@ -26,16 +28,22 @@ from constants import (
 from database import Base, engine, get_db
 import models
 import optimizer
+import report
 from schemas import (
     AIExplanationRequest,
     AIExplanationResponse,
+    BRSRReportResponse,
     CarbonActivityCreate,
     CarbonActivityResponse,
+    CarbonCSVUploadRequest,
+    CarbonCSVUploadResponse,
     CarbonSummaryResponse,
     HealthResponse,
     OptimizationRecommendation,
     OptimizationRequest,
     OptimizationResponse,
+    ReportSignRequest,
+    ReportSignResponse,
     SupplierCreate,
     SupplierEmissionResponse,
     SupplierResponse,
@@ -213,6 +221,196 @@ def create_carbon_activity(
         emissions_kgco2e=activity.emissions_kgco2e,
         is_primary=activity.is_primary,
         is_flagged=activity.is_flagged,
+    )
+
+
+@carbon_router.post(
+    "/upload",
+    response_model=CarbonCSVUploadResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Upload and ingest structured carbon activity data (CSV)",
+    description=(
+        "Ingests CSV structured carbon activity rows, performs deterministic "
+        "GHG calculations via carbon.py, persists records to the database, "
+        "and registers cryptographic SHA-256 blocks in the verification ledger."
+    ),
+)
+def upload_carbon_csv(
+    payload: CarbonCSVUploadRequest,
+    db: Session = Depends(get_db),
+) -> CarbonCSVUploadResponse:
+    """Ingest CSV structured activity records, calculate emissions, and register ledger hashes."""
+    # 1. Validate company exists
+    company = db.query(models.Company).filter(models.Company.company_id == payload.company_id).first()
+    if not company:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Company with ID {payload.company_id} not found.",
+        )
+
+    # 2. Check file type / format
+    filename_lower = (payload.filename or "").lower()
+    if filename_lower.endswith(".pdf") or "pdf" in filename_lower:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "PDF ingestion and OCR are out of scope for this CarbonTrace prototype. "
+                "Please upload a structured CSV file with columns: "
+                "activity_type, activity_quantity, activity_unit, is_primary, emission_factor."
+            ),
+        )
+
+    content_str = (payload.content or "").strip()
+    if not content_str:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="CSV file content is empty.",
+        )
+
+    # 3. Parse CSV rows
+    try:
+        reader = csv.DictReader(StringIO(content_str))
+        rows = list(reader)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Malformed CSV content: {str(exc)}",
+        )
+
+    if not rows:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No valid data rows found in CSV file.",
+        )
+
+    # 4. Process each row deterministically
+    created_entries: list[CarbonActivityResponse] = []
+    total_emissions = 0.0
+    primary_count = 0
+    estimated_count = 0
+
+    for idx, row in enumerate(rows, start=1):
+        # Normalize header keys
+        norm_row = {k.lower().strip(): v.strip() for k, v in row.items() if k is not None and v is not None}
+
+        activity_type = norm_row.get("activity_type") or norm_row.get("activity") or norm_row.get("type")
+        if not activity_type:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Row #{idx}: Missing required 'activity_type' column.",
+            )
+
+        qty_raw = norm_row.get("activity_quantity") or norm_row.get("quantity") or norm_row.get("qty")
+        try:
+            qty = float(qty_raw) if qty_raw else 0.0
+            if qty <= 0:
+                raise ValueError("Quantity must be positive.")
+        except (ValueError, TypeError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Row #{idx}: Invalid quantity '{qty_raw}'. Must be a positive number.",
+            )
+
+        unit = norm_row.get("activity_unit") or norm_row.get("unit") or "units"
+
+        is_primary_raw = norm_row.get("is_primary") or norm_row.get("primary") or "false"
+        is_primary = is_primary_raw.lower() in ("true", "1", "yes", "primary")
+
+        ef_raw = norm_row.get("emission_factor") or norm_row.get("ef")
+        custom_ef: float | None = None
+        if ef_raw:
+            try:
+                custom_ef = float(ef_raw)
+            except (ValueError, TypeError):
+                custom_ef = None
+
+        # Execute deterministic GHG calculation via carbon.py
+        try:
+            calc_result = carbon.calculate_activity(
+                activity_type=activity_type,
+                activity_quantity=qty,
+                activity_unit=unit,
+                is_primary=is_primary,
+                custom_emission_factor=custom_ef,
+            )
+        except (
+            carbon.UnknownActivityTypeError,
+            carbon.PendingFactorError,
+            carbon.InvalidQuantityError,
+            carbon.UnitMismatchError,
+        ) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Row #{idx} ({activity_type}): {str(exc)}",
+            )
+
+        # Persist ORM model
+        activity = models.CarbonActivity(
+            company_id=payload.company_id,
+            activity_type=calc_result.activity_type,
+            activity_quantity=calc_result.activity_quantity,
+            activity_unit=calc_result.activity_unit,
+            emission_factor=calc_result.emission_factor,
+            emissions_kgco2e=calc_result.emissions_kgco2e,
+            is_primary=calc_result.is_primary,
+            is_flagged=calc_result.is_flagged,
+        )
+        db.add(activity)
+        db.commit()
+        db.refresh(activity)
+
+        # Register SHA-256 hash in verification ledger
+        hash_payload = {
+            "entry_id": activity.entry_id,
+            "company_id": activity.company_id,
+            "activity_type": activity.activity_type,
+            "activity_quantity": activity.activity_quantity,
+            "activity_unit": activity.activity_unit,
+            "emission_factor": activity.emission_factor,
+            "emissions_kgco2e": activity.emissions_kgco2e,
+            "is_primary": activity.is_primary,
+        }
+        data_hash = verification.compute_data_hash(hash_payload)
+        verification.ledger.add_entry(
+            entry_type="carbon_activity",
+            source_id=activity.entry_id,
+            data_hash=data_hash,
+            is_primary=activity.is_primary,
+            metadata={
+                "company_id": activity.company_id,
+                "is_flagged": activity.is_flagged,
+                "uploaded_filename": payload.filename,
+            },
+        )
+
+        total_emissions += calc_result.emissions_kgco2e
+        if calc_result.is_primary:
+            primary_count += 1
+        else:
+            estimated_count += 1
+
+        created_entries.append(
+            CarbonActivityResponse(
+                entry_id=activity.entry_id,
+                company_id=activity.company_id,
+                activity_type=activity.activity_type,
+                activity_quantity=activity.activity_quantity,
+                activity_unit=activity.activity_unit,
+                emissions_kgco2e=activity.emissions_kgco2e,
+                is_primary=activity.is_primary,
+                is_flagged=activity.is_flagged,
+            )
+        )
+
+    return CarbonCSVUploadResponse(
+        filename=payload.filename,
+        activities_imported=len(created_entries),
+        total_emissions_kgco2e=round(total_emissions, 4),
+        primary_activities_count=primary_count,
+        estimated_activities_count=estimated_count,
+        ledger_entries_registered=len(created_entries),
+        entries=created_entries,
+        message=f"Successfully imported {len(created_entries)} activities from {payload.filename} into database and verification ledger.",
     )
 
 
@@ -604,6 +802,129 @@ def seed_demo_endpoint(
 
 
 # ============================================================
+# BRSR REPORTING & GOVERNANCE ROUTER
+# ============================================================
+
+report_router = APIRouter(
+    prefix=f"{API_PREFIX}/report",
+    tags=["BRSR Reporting & Governance"],
+)
+
+
+@report_router.get(
+    "/{company_id}",
+    response_model=BRSRReportResponse,
+    summary="Generate full BRSR Compliance Report",
+    description=(
+        "Assembles a comprehensive, audit-ready BRSR compliance report object combining "
+        "PostgreSQL emissions inventory, Scope 1/2/3 breakdown, value-chain supplier disclosures, "
+        "SHA-256 hash-chain verification audit trail, PuLP optimization plan, and AI executive summary."
+    ),
+)
+def get_brsr_report_endpoint(
+    company_id: int,
+    db: Session = Depends(get_db),
+) -> BRSRReportResponse:
+    try:
+        return report.build_brsr_report(company_id=company_id, db=db)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        )
+
+
+@report_router.get(
+    "/{company_id}/pdf",
+    summary="Export BRSR Compliance Report as PDF",
+    description="Generates and streams a presentation-ready multi-page PDF document created with ReportLab.",
+    responses={200: {"content": {"application/pdf": {}}}},
+)
+def export_brsr_pdf_endpoint(
+    company_id: int,
+    db: Session = Depends(get_db),
+):
+    try:
+        brsr = report.build_brsr_report(company_id=company_id, db=db)
+        pdf_bytes = report.generate_brsr_pdf(brsr)
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="CarbonTrace_BRSR_Report_{company_id}.pdf"',
+            },
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        )
+
+
+@report_router.post(
+    "/sign",
+    response_model=ReportSignResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Sign and approve corporate emissions report at application level",
+    description=(
+        "Creates a local application-level approval record and deterministic SHA-256 signature "
+        "hash bound to the report state, signer identity, and verification integrity status."
+    ),
+)
+def sign_report_endpoint(
+    payload: ReportSignRequest,
+    db: Session = Depends(get_db),
+) -> ReportSignResponse:
+    if not payload.is_confirmed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Confirmation is required before signing the report. Please check the confirmation box.",
+        )
+
+    company = db.query(models.Company).filter(models.Company.company_id == payload.company_id).first()
+    if not company:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Company with ID {payload.company_id} not found.",
+        )
+
+    activities = (
+        db.query(models.CarbonActivity)
+        .filter(models.CarbonActivity.company_id == payload.company_id)
+        .all()
+    )
+    summary = carbon.aggregate_company_summary(payload.company_id, activities)
+    chain_val = verification.ledger.validate_chain()
+
+    return report.record_report_signature(
+        company_id=payload.company_id,
+        company_name=company.company_name,
+        signer_name=payload.signer_name.strip() or "Authorized Signatory",
+        signer_role=payload.signer_role.strip() or "Sustainability Officer",
+        total_emissions_kgco2e=summary.total_emissions_kgco2e,
+        is_verified=chain_val.is_verified,
+        notes=payload.notes,
+    )
+
+
+@report_router.get(
+    "/sign/{company_id}",
+    response_model=ReportSignResponse,
+    summary="Get existing signing approval record for a company",
+)
+def get_report_sign_status(
+    company_id: int,
+) -> ReportSignResponse:
+    sign_rec = report.get_report_signature(company_id)
+    if not sign_rec:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No signing record found for company ID {company_id}.",
+        )
+    return sign_rec
+
+
+# ============================================================
 # ROUTER MOUNTING
 # ============================================================
 
@@ -621,4 +942,7 @@ app.include_router(
 app.include_router(optimization_router)
 app.include_router(ai_router)
 app.include_router(seed_router)
+
+# Mount BRSR reporting router
+app.include_router(report_router)
 

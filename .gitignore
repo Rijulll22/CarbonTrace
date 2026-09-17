@@ -1,1 +1,11 @@
 .env
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.sqlite3
+backend/openapi.json
+backend/test_report.pdf
+backend/sample.csv

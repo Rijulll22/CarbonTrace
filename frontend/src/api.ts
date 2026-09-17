@@ -150,6 +150,99 @@ export interface SeedResponse {
   message: string
 }
 
+export interface CarbonCSVUploadRequest {
+  company_id: number
+  filename: string
+  content: string
+}
+
+export interface CarbonCSVUploadResponse {
+  filename: string
+  activities_imported: number
+  total_emissions_kgco2e: number
+  primary_activities_count: number
+  estimated_activities_count: number
+  ledger_entries_registered: number
+  entries: CarbonActivity[]
+  message: string
+}
+
+export interface ReportSignRequest {
+  company_id: number
+  signer_name: string
+  signer_role: string
+  is_confirmed: boolean
+  notes?: string | null
+}
+
+export interface ReportSignResponse {
+  report_id: string
+  company_id: number
+  signed_at: string
+  signer_name: string
+  signer_role: string
+  signature_hash: string
+  is_verified: boolean
+  status: string
+  total_emissions_kgco2e: number
+  message: string
+}
+
+export interface BRSRSupplierSummary {
+  supplier_id: number
+  supplier_name: string
+  industry: string | null
+  location: string | null
+  emissions_kgco2e: number
+  is_primary: boolean
+  is_verified: boolean
+}
+
+export interface BRSRSectionHeader {
+  report_id: string
+  company_name: string
+  company_id: number
+  reporting_period: string
+  industry: string | null
+  location: string | null
+  generated_at: string
+  standard: string
+}
+
+export interface BRSRDecarbonizationPlan {
+  target_reduction_percentage: number
+  target_emissions_kgco2e: number
+  optimized_reduction_kgco2e: number
+  residual_emissions_kgco2e: number
+  budget_inr: number | null
+  budget_used_inr: number
+  target_achieved: boolean
+  status: string
+  recommendations: OptimizationRecommendation[]
+}
+
+export interface BRSRReportResponse {
+  header: BRSRSectionHeader
+  executive_summary: string
+  is_ai_generated: boolean
+  is_fallback_ai: boolean
+  total_emissions_kgco2e: number
+  scope_1_emissions_kgco2e: number
+  scope_2_emissions_kgco2e: number
+  scope_3_emissions_kgco2e: number
+  primary_emissions_kgco2e: number
+  estimated_emissions_kgco2e: number
+  primary_data_percentage: number
+  flagged_entries_count: number
+  top_suppliers: BRSRSupplierSummary[]
+  verification_summary: VerificationSummary
+  hash_chain_valid: boolean
+  decarbonization_plan: BRSRDecarbonizationPlan
+  ai_explanation: string
+  approval: ReportSignResponse | null
+  disclaimer: string
+}
+
 // ─── API helper functions ─────────────────────────────────────────────────────
 
 /** GET /api/v1/carbon/summary/{company_id} */
@@ -160,6 +253,14 @@ export function getCarbonSummary(companyId: number) {
 /** GET /api/v1/carbon/activities/{company_id} */
 export function getCarbonActivities(companyId: number) {
   return apiFetch<CarbonActivity[]>(`/api/v1/carbon/activities/${companyId}`)
+}
+
+/** POST /api/v1/carbon/upload */
+export function uploadCarbonCSV(request: CarbonCSVUploadRequest) {
+  return apiFetch<CarbonCSVUploadResponse>('/api/v1/carbon/upload', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  })
 }
 
 /** GET /api/v1/suppliers/{company_id} */
@@ -187,6 +288,20 @@ export function getVerificationSummary(companyId: number) {
   return apiFetch<VerificationSummary>(`/api/v1/verify/summary/${companyId}`)
 }
 
+/** POST /api/v1/verify/tamper/{entry_id} */
+export function tamperVerificationEntry(entryId: number) {
+  return apiFetch<{ status: string; entry_id: number; message: string }>(`/api/v1/verify/tamper/${entryId}`, {
+    method: 'POST',
+  })
+}
+
+/** POST /api/v1/verify/reset */
+export function resetVerificationLedger() {
+  return apiFetch<{ status: string; total_entries: number; message: string }>('/api/v1/verify/reset', {
+    method: 'POST',
+  })
+}
+
 /** POST /api/v1/optimize */
 export function runOptimization(request: OptimizationRequest) {
   return apiFetch<OptimizationResponse>('/api/v1/optimize', {
@@ -201,6 +316,51 @@ export function getAIExplanation(request: AIExplanationRequest) {
     method: 'POST',
     body: JSON.stringify(request),
   })
+}
+
+/** GET /api/v1/report/{company_id} */
+export function getBRSRReport(companyId: number) {
+  return apiFetch<BRSRReportResponse>(`/api/v1/report/${companyId}`)
+}
+
+/** POST /api/v1/report/sign */
+export function signReport(request: ReportSignRequest) {
+  return apiFetch<ReportSignResponse>('/api/v1/report/sign', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  })
+}
+
+/** GET /api/v1/report/sign/{company_id} */
+export function getReportSigning(companyId: number) {
+  return apiFetch<ReportSignResponse>(`/api/v1/report/sign/${companyId}`)
+}
+
+/** GET /api/v1/report/{company_id}/pdf download helper */
+export function getReportPDFUrl(companyId: number): string {
+  return `${BASE_URL}/api/v1/report/${companyId}/pdf`
+}
+
+/** Trigger direct browser download of generated PDF */
+export async function downloadReportPDF(companyId: number, filename = 'CarbonTrace_BRSR_Report.pdf') {
+  const res = await fetch(getReportPDFUrl(companyId))
+  if (!res.ok) {
+    let detail = `Failed to download PDF (HTTP ${res.status})`
+    try {
+      const err = await res.json()
+      detail = err.detail || detail
+    } catch { /* ignore */ }
+    throw new Error(detail)
+  }
+  const blob = await res.blob()
+  const url = window.URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  window.URL.revokeObjectURL(url)
 }
 
 /** POST /api/v1/seed */

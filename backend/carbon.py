@@ -196,12 +196,15 @@ def validate_quantity(activity_quantity: float, activity_type: str) -> None:
 def validate_unit(activity_unit: str, resolved: ResolvedFactor) -> None:
     """
     Validate that the submitted activity_unit matches the factor's expected
-    unit from constants.py.  Units are NOT silently converted.
+    unit from constants.py (case-insensitive and format-normalized).
+    Units are NOT silently converted across dimension types.
 
     Raises:
         UnitMismatchError: submitted unit does not match the factor's unit.
     """
-    if activity_unit != resolved.unit:
+    norm_submitted = activity_unit.strip().lower().replace("-", "_")
+    norm_expected = resolved.unit.strip().lower().replace("-", "_")
+    if norm_submitted != norm_expected:
         raise UnitMismatchError(
             f"Unit mismatch for '{resolved.activity_type}': "
             f"expected '{resolved.unit}', got '{activity_unit}'. "
