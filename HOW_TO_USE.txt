@@ -1,0 +1,500 @@
+================================================================================
+  CarbonTrace — HOW TO USE (Demo Guide)
+  For: Hackathon Teammates & Judges
+  Version: FY 2025-26 Demo Build
+================================================================================
+
+WHAT IS CARBONTRACE?
+────────────────────
+CarbonTrace is a GHG Protocol-aligned carbon accounting and verification
+prototype. It enables companies to:
+
+  1. Record and calculate carbon emissions from business activities
+     (deterministically: emissions = activity_quantity × emission_factor)
+  2. Store emissions in a PostgreSQL database with full traceability
+  3. Cryptographically verify records using a SHA-256 hash-chain ledger
+  4. Optimize reduction pathways under a budget using linear programming (PuLP)
+  5. Explain emissions data in plain language using an LLM (explanation only)
+
+IMPORTANT SCOPE LIMITATIONS (What CarbonTrace does NOT currently do):
+  - It does NOT parse PDFs, Excel files, or CSV documents
+  - It does NOT use OCR or document extraction
+  - The Upload / Document Processing / Extracted Review screens are
+    VISUAL/STATIC PROTOTYPE screens only — they do not process real documents
+  - There is NO live blockchain deployment. The Solidity contract
+    (blockchain/CarbonRetirement.sol) is a static code artifact only.
+  - There is NO carbon credit retirement workflow
+  - This is NOT a statutory compliance tool and NOT third-party assured
+  - Do NOT claim regulatory certification during the presentation
+
+Position CarbonTrace as: "a GHG Protocol-aligned prototype"
+
+================================================================================
+WHAT THE DEMO DEMONSTRATES
+================================================================================
+
+  - A fictional demo company ("ABC Manufacturing") with 10 realistic carbon
+    activity records seeded directly into PostgreSQL
+  - Total demo emissions: ~225.2 tCO2e
+  - Primary data: 98.4% of emission sources
+  - SHA-256 hash-chain ledger with 10 entries — all verified
+  - A budget-constrained optimizer that recommends intervention actions
+  - An AI explanation endpoint that describes the data in plain language
+
+================================================================================
+SYSTEM REQUIREMENTS
+================================================================================
+
+  - Windows 10 / 11
+  - PostgreSQL installed (data directory: D:\INFOSEC PROJECT\.pgsql)
+  - Python 3.10 (virtual environment at D:\Buildonomics\CarbonTrace\.venv)
+  - Node.js (npm) for the React frontend
+
+================================================================================
+STEP 1 — START POSTGRESQL
+================================================================================
+
+Open a new PowerShell window and run:
+
+  & "D:\INFOSEC PROJECT\.pgsql\bin\postgres.exe" -D "D:\INFOSEC PROJECT\.pgsql\data"
+
+Leave this window OPEN and running.
+
+  Verify PostgreSQL is accepting connections (in another terminal):
+
+    & "D:\INFOSEC PROJECT\.pgsql\bin\psql.exe" -U postgres -c "SELECT 1;"
+
+  Expected output: A table showing "?column? = 1"
+
+  The database used is:    carbontrace
+  Host:                    localhost
+  Port:                    5432
+  User:                    postgres
+  Password:                postgres
+
+================================================================================
+STEP 2 — START THE FASTAPI BACKEND
+================================================================================
+
+Open a NEW PowerShell window.
+
+  cd D:\Buildonomics\CarbonTrace\backend
+  ..\\.venv\Scripts\uvicorn.exe main:app --port 8000
+
+Leave this window OPEN.
+
+  Expected startup output:
+    INFO:     Uvicorn running on http://127.0.0.1:8000
+
+  Verify the backend is responding:
+
+    Invoke-WebRequest -Uri http://127.0.0.1:8000/health -UseBasicParsing
+
+  Expected response (Status 200):
+    {"status":"ok","service":"CarbonTrace API"}
+
+================================================================================
+STEP 3 — START THE REACT FRONTEND
+================================================================================
+
+Open a THIRD PowerShell window.
+
+  cd D:\Buildonomics\CarbonTrace\frontend
+  npm run dev
+
+Leave this window OPEN.
+
+  Expected output:
+    VITE v8.x.x ready in xxx ms
+    Local:   http://127.0.0.1:5173/
+
+  Open your browser and go to:
+    http://127.0.0.1:5173/
+
+================================================================================
+STEP 4 — VERIFY BOTH SERVICES ARE RUNNING
+================================================================================
+
+Quick check (run in any PowerShell window):
+
+  Test-NetConnection localhost -Port 5432   # PostgreSQL
+  Test-NetConnection localhost -Port 8000   # FastAPI backend
+  Test-NetConnection localhost -Port 5173   # React frontend
+
+  All three should show: TcpTestSucceeded = True
+
+Swagger API documentation:
+  http://127.0.0.1:8000/docs
+
+================================================================================
+STEP 5 — SEED THE DEMO DATABASE
+================================================================================
+
+  ⚠ Do this ONCE before demonstrating. It is idempotent (safe to repeat).
+
+In PowerShell:
+
+  Invoke-WebRequest -Uri http://127.0.0.1:8000/api/v1/seed -Method POST -UseBasicParsing
+
+Expected response (Status 200):
+  {
+    "status": "seeded",
+    "company_id": 1,
+    "company_name": "ABC Manufacturing",
+    "activities_seeded": 10,
+    "suppliers_seeded": 3,
+    "total_emissions_kgco2e": 225200.0,
+    "ledger_entries_count": 10,
+    "message": "Demo data successfully seeded into database and verification ledger."
+  }
+
+This creates:
+  - 1 demo company: ABC Manufacturing
+  - 3 demo suppliers (Supplier A, B, C)
+  - 10 carbon activity records with deterministic emissions
+  - 10 SHA-256 hash-chain ledger entries
+
+  ✅ You are now ready to demo the application.
+
+================================================================================
+STEP 6 — DEMO FLOW THROUGH THE WEBSITE
+================================================================================
+
+Open browser: http://127.0.0.1:5173/
+
+─────────────────────────────────────────────────────────
+SCREEN: LOGIN
+─────────────────────────────────────────────────────────
+  - The login page has an email/password form
+  - Enter any email and password (authentication is demo-mode)
+  - Click "Sign In to CarbonTrace"
+  - You will be taken to the Dashboard
+
+─────────────────────────────────────────────────────────
+SCREEN: DASHBOARD
+─────────────────────────────────────────────────────────
+  URL: Dashboard (left nav — first item)
+
+  What you see (REAL data from PostgreSQL):
+    - Total Emissions: ~225.2 tCO2e
+    - Primary Emissions: ~221.6 tCO2e
+    - Estimated Emissions: ~3.6 tCO2e
+    - Primary Data %: ~98.4%
+    - Flagged Records: 0
+
+  The bar chart shows Primary vs Estimated emissions breakdown.
+  The Quick Actions panel lets you navigate to any workflow.
+
+  What to say:
+    "These KPI numbers come directly from the PostgreSQL database through
+    the GET /api/v1/carbon/summary/1 endpoint."
+
+─────────────────────────────────────────────────────────
+SCREEN: CARBON DATA
+─────────────────────────────────────────────────────────
+  Click "Carbon Data" in the left sidebar.
+
+  What you see (REAL data from PostgreSQL):
+    - A table of 10 carbon activity records
+    - Each row shows: activity type, quantity, unit, emissions_kgco2e,
+      PRIMARY or ESTIMATED badge, flagged status
+    - Example records:
+        grid_electricity    100,000 kWh      × 0.72   = 72,000 kgCO2e  [PRIMARY]
+        diesel_fleet         30,000 litres   × 2.68   = 80,400 kgCO2e  [PRIMARY]
+        natural_gas          20,000 m3       × 2.02   = 40,400 kgCO2e  [PRIMARY]
+        freight_transport       500 tonne-km × 0.20   =    100 kgCO2e  [ESTIMATED]
+        supplier_electricity 40,000 kWh      × 0.72   = 28,800 kgCO2e  [PRIMARY]
+        business_travel      25,000 pass-km  × 0.14   =  3,500 kgCO2e  [ESTIMATED]
+
+  What to say:
+    "Emissions are calculated deterministically: activity_quantity times
+    emission_factor. No AI or estimation is used for calculations. The LLM
+    is used only for explanation text."
+
+  Data source API endpoint: GET /api/v1/carbon/activities/1
+
+─────────────────────────────────────────────────────────
+SCREEN: UPLOAD & ANALYZE (STATIC PROTOTYPE SCREEN)
+─────────────────────────────────────────────────────────
+  Click "Upload & Analyze" in the left sidebar.
+
+  ⚠ IMPORTANT — WHAT TO SAY:
+    "This Upload screen is a VISUAL PROTOTYPE showing what the document
+    ingestion workflow would look like in a production system. CarbonTrace
+    currently does NOT parse PDFs or any other documents. The demo data
+    you see in the system was seeded directly through the database API.
+    The sample PDF in our demo_data folder is a presentation artifact only."
+
+  The file list shown is static/hardcoded example data.
+
+─────────────────────────────────────────────────────────
+SCREEN: SUPPLIERS
+─────────────────────────────────────────────────────────
+  Click "Suppliers" in the left sidebar.
+
+  What you see (REAL data from PostgreSQL):
+    - 3 suppliers: Supplier A (Steel, Tamil Nadu, Verified),
+      Supplier B (Electronics, Karnataka, Unverified),
+      Supplier C (Packaging, Maharashtra, Verified)
+    - KPI cards: Total Suppliers, Verified, Unverified counts
+    - Click any supplier row to see a detail panel
+
+  Data source API endpoint: GET /api/v1/suppliers/1
+
+─────────────────────────────────────────────────────────
+SCREEN: VERIFICATION LEDGER
+─────────────────────────────────────────────────────────
+  Click "Verification" in the left sidebar.
+
+  What you see (REAL data from hash-chain ledger):
+    - Status banner: "✓ CHAIN INTACT — 10 entries checked — All hashes match"
+    - KPI cards: Total Entries = 10, Verified = 10, Integrity = 100%
+    - A block explorer showing each ledger entry
+
+  ── HOW TO DEMONSTRATE THE HASH-CHAIN ──
+
+  1. The green banner shows the chain is verified:
+       "SHA-256 hash-chain ledger — All hashes match"
+
+  2. Click any block entry to expand it:
+       - Previous Hash: the SHA-256 hash of the block before it
+       - Block Hash: SHA-256 hash of previous_hash + this entry's data
+       - Entry type, source_id, is_primary flag
+
+  3. Click the "Verify Chain" button (top right of banner)
+       - This calls GET /api/v1/verify/validate
+       - The backend re-computes every hash in sequence
+       - If all match: "All 10 ledger entries verified successfully. Hash-chain integrity intact."
+       - This is TAMPER-EVIDENT: any modification to a stored record
+         would break the chain and flag invalid entries
+
+  4. Show the info note at the top:
+       "This is a SHA-256 hash-chain ledger (tamper-evident audit trail).
+        Each block's hash depends on the previous block.
+        This is NOT a deployed blockchain or smart contract."
+
+  Data source API endpoints:
+    GET /api/v1/verify/entries
+    GET /api/v1/verify/validate
+    GET /api/v1/verify/summary/1
+
+─────────────────────────────────────────────────────────
+SCREEN: OPTIMIZER
+─────────────────────────────────────────────────────────
+  Click "Optimizer" in the left sidebar.
+
+  ── HOW TO DEMONSTRATE BUDGET-CONSTRAINED OPTIMIZATION ──
+
+  1. The form has two inputs:
+       - Target Reduction (%): type  10
+       - Budget (₹):           type  500000
+
+  2. Click "Run Optimizer"
+
+  3. The backend runs PuLP/CBC linear programming:
+       - POST /api/v1/optimize
+       - Body: {"company_id": 1, "target_reduction_percentage": 10, "budget_inr": 500000}
+
+  4. Results appear on the right panel:
+       - Current Emissions:  225,200 kgCO2e (~225.2 tCO2e)
+       - Target Reduction:   10%
+       - Required Reduction: 22,520 kgCO2e
+       - Optimized Reduction: (solver output)
+       - Budget Used / Remaining
+       - Target Achieved: Yes or No
+       - Status: e.g. "optimal"
+
+  5. The Abatement by Intervention chart appears below.
+
+  Show the judges:
+    "CarbonTrace uses the PuLP library with the free CBC solver — no proprietary
+    optimizer, no LLM — to select the minimum-cost set of interventions that
+    meets the target reduction within the given budget."
+
+  Try different budget values to show the solver adapting:
+    - Budget ₹100,000  → fewer interventions, may not reach target
+    - Budget ₹500,000  → more interventions selected
+    - Budget ₹2,000,000 → full target comfortably achieved
+
+─────────────────────────────────────────────────────────
+SCREEN: REPORT
+─────────────────────────────────────────────────────────
+  Click "Report" in the left sidebar.
+
+  What you see:
+    - A professional GHG emissions disclosure report header
+    - Section 1: Executive Summary with live KPI cards from the database
+    - "Generate AI Explanation" button
+
+  ── HOW TO DEMONSTRATE AI EXPLANATION ──
+
+  1. Click the green "Generate AI Explanation" button
+  2. The backend calls: POST /api/v1/ai/explain
+     (context_type="summary", context_id=1)
+  3. An AI-generated summary appears in the green box
+     - If an OpenRouter/OpenAI API key is configured in the backend .env,
+       a real LLM explanation appears
+     - If no key is configured, a graceful fallback message appears
+  4. The explanation is clearly labelled "AI-generated explanation"
+
+  What to say:
+    "The LLM only provides explanation text. It does NOT calculate emissions,
+    invent emission factors, or make decisions. All numbers come from the
+    deterministic backend calculation."
+
+  - Section 2: Emissions Breakdown (pie chart, primary vs estimated)
+  - Section 3: Methodology (GHG Protocol-aligned prototype note)
+  - Section 4: Assurance Statement (clearly states NOT third-party assured)
+  - Section 4: SHA-256 hash-chain verification count from live data
+
+  ⚠ Important disclosure note:
+    "CarbonTrace does not provide statutory certification or regulatory
+    assurance. It is a GHG Protocol-aligned prototype."
+
+================================================================================
+WHAT NOT TO CLAIM DURING THE PRESENTATION
+================================================================================
+
+  ✗ Do NOT claim: "CarbonTrace reads/parses PDFs automatically"
+    ✓ Say: "The Upload screen is a visual prototype. Data is currently
+           seeded through the API."
+
+  ✗ Do NOT claim: "CarbonTrace is deployed on a blockchain"
+    ✓ Say: "CarbonTrace uses a SHA-256 hash-chain ledger for tamper-evident
+           verification. The Solidity contract is a static code artifact
+           showing how retirement could work in a future version."
+
+  ✗ Do NOT claim: "These emissions are regulatory-certified or assured"
+    ✓ Say: "This is a GHG Protocol-aligned prototype. Third-party assurance
+           would be required for statutory reporting."
+
+  ✗ Do NOT claim: "The AI calculates emissions"
+    ✓ Say: "The AI provides plain-language explanations only.
+           All calculations are deterministic: quantity × emission factor."
+
+  ✗ Do NOT claim: "Carbon credits are retired on-chain"
+    ✓ Say: "Credit retirement is not implemented in this prototype."
+
+================================================================================
+TROUBLESHOOTING COMMON PROBLEMS
+================================================================================
+
+PROBLEM: Dashboard shows loading spinner / error banner
+─────────────────────────────────────────────────────────
+  CAUSE:   FastAPI backend not running, or database not seeded
+  FIX 1:   Check that uvicorn is running (Step 2)
+  FIX 2:   Run seed: Invoke-WebRequest -Uri http://127.0.0.1:8000/api/v1/seed -Method POST -UseBasicParsing
+  FIX 3:   Check PostgreSQL is running (Step 1)
+
+PROBLEM: Frontend shows "Failed to fetch" or network error
+──────────────────────────────────────────────────────────
+  CAUSE:   Backend on wrong port, or CORS issue
+  CHECK:   Is backend running on port 8000?
+           Test-NetConnection localhost -Port 8000
+  FIX:     Restart backend with exactly:
+           ..\\.venv\Scripts\uvicorn.exe main:app --port 8000
+           (run from backend\ directory)
+
+PROBLEM: PostgreSQL fails to start
+───────────────────────────────────
+  CAUSE:   Another PostgreSQL process already running
+  FIX:     Check task manager for postgres.exe processes and kill them first
+  CHECK:   Test-NetConnection localhost -Port 5432
+
+PROBLEM: npm run dev fails
+──────────────────────────
+  FIX:     cd D:\Buildonomics\CarbonTrace\frontend; npm install
+           Then: npm run dev
+
+PROBLEM: Optimizer returns 422 error
+─────────────────────────────────────
+  CAUSE:   target_reduction_percentage is 0 or > 100
+  FIX:     Use a value between 0.01 and 100 (e.g. 10)
+
+PROBLEM: Verification screen shows "No ledger entries"
+───────────────────────────────────────────────────────
+  CAUSE:   Database not seeded yet
+  FIX:     POST /api/v1/seed (see Step 5)
+
+PROBLEM: AI explanation shows fallback message
+──────────────────────────────────────────────
+  CAUSE:   No API key configured (OpenRouter or OpenAI)
+  NOTE:    This is EXPECTED in demo mode. The fallback message is intentional.
+  FIX:     Add OPENROUTER_API_KEY or OPENAI_API_KEY to backend/.env
+
+================================================================================
+STOPPING THE APPLICATION AFTER THE DEMO
+================================================================================
+
+In each PowerShell window, press Ctrl+C to stop the running process:
+
+  Window 1 (PostgreSQL):   Ctrl+C
+  Window 2 (FastAPI):      Ctrl+C
+  Window 3 (npm dev):      Ctrl+C
+
+To reset the demo database for a fresh run:
+  1. Stop the FastAPI server
+  2. Run: & "D:\INFOSEC PROJECT\.pgsql\bin\psql.exe" -U postgres -c "DROP DATABASE IF EXISTS carbontrace;"
+  3. Run: & "D:\INFOSEC PROJECT\.pgsql\bin\psql.exe" -U postgres -c "CREATE DATABASE carbontrace;"
+  4. Restart FastAPI (it will recreate tables on startup)
+  5. POST /api/v1/seed again
+
+================================================================================
+QUICK REFERENCE — WORKING API ENDPOINTS
+================================================================================
+
+  GET  http://127.0.0.1:8000/                          # Root
+  GET  http://127.0.0.1:8000/health                    # Health check
+  GET  http://127.0.0.1:8000/docs                      # Swagger UI
+
+  POST http://127.0.0.1:8000/api/v1/seed               # Seed demo data
+
+  GET  http://127.0.0.1:8000/api/v1/carbon/summary/1   # Carbon KPIs
+  GET  http://127.0.0.1:8000/api/v1/carbon/activities/1 # Activity records
+  POST http://127.0.0.1:8000/api/v1/carbon/activity    # Add activity
+
+  GET  http://127.0.0.1:8000/api/v1/suppliers/1        # Supplier list
+  GET  http://127.0.0.1:8000/api/v1/suppliers/{id}/emissions
+  POST http://127.0.0.1:8000/api/v1/suppliers/
+
+  GET  http://127.0.0.1:8000/api/v1/verify/entries     # All ledger entries
+  GET  http://127.0.0.1:8000/api/v1/verify/validate    # Verify hash-chain
+  GET  http://127.0.0.1:8000/api/v1/verify/summary/1   # Verification stats
+
+  POST http://127.0.0.1:8000/api/v1/optimize           # Run optimizer
+       Body: {"company_id": 1, "target_reduction_percentage": 10.0, "budget_inr": 500000.0}
+
+  POST http://127.0.0.1:8000/api/v1/ai/explain         # AI explanation
+       Body: {"context_type": "summary", "context_id": 1, "question": "Summarize emissions."}
+
+================================================================================
+REPOSITORY STRUCTURE
+================================================================================
+
+  D:\Buildonomics\CarbonTrace\
+  ├── backend\                   FastAPI application
+  │   ├── main.py                Application entrypoint + all routers
+  │   ├── models.py              SQLAlchemy ORM models
+  │   ├── schemas.py             Pydantic request/response schemas
+  │   ├── carbon.py              Carbon calculation engine
+  │   ├── verification.py        SHA-256 hash-chain ledger
+  │   ├── optimizer.py           PuLP/CBC optimization engine
+  │   ├── ai.py                  LLM explanation layer
+  │   ├── seed_demo.py           Deterministic demo data
+  │   ├── constants.py           Emission factors + config
+  │   ├── database.py            SQLAlchemy engine + session
+  │   └── requirements.txt       Python dependencies
+  ├── frontend\                  React + Vite + TypeScript frontend
+  │   └── src\
+  │       ├── App.tsx            All screens and components
+  │       └── api.ts             Typed API helper functions
+  ├── blockchain\
+  │   └── CarbonRetirement.sol   Static Solidity contract (NOT deployed)
+  ├── demo_data\                 Demo artifacts for presentation
+  │   └── CarbonTrace_Demo_Supplier_Emissions_Report.pdf
+  ├── HOW_TO_USE.txt             This file
+  └── README.md
+
+================================================================================
+END OF HOW_TO_USE.txt
+================================================================================
